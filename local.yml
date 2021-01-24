@@ -8,6 +8,4 @@
     package:
       name: 
         - htop
-        - Deluge
-        - Bitwarden
-        - Opera
+        - tmux
