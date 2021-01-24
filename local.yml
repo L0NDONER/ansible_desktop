@@ -1,7 +1,14 @@
-- name: Run the equivalent of "apt-get update" as a separate step
-    apt:
-      update_cache: true
-      cache_valid_time: 3600
-  - name: Update all packages to the latest version
-    apt:
-      upgrade: dist
+---
+- hosts: localhost
+  connection: local
+  become: true
+
+  tasks:
+  - name: install packages
+    package:
+      name:
+        - htop
+        - opera
+        - bitwarden
+        - deluge
+        - sumblimetext3
