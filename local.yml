@@ -1,10 +1,27 @@
-- hosts: all
-  become: yes
-  tasks:
-  - name: Update and upgrade apt packages
-    apt:
-      upgrade: yes
-      update_cache: yes
-      cache_valid_time: 86400 
+# do an "apt-get update", to ensure latest package lists
+    - name: apt-get update
+      apt:
+        update-cache: yes
+        changed_when: 0
 
+    # get a list of packages that have updates
+    - name: get list of pending upgrades
+      command: apt-get --simulate dist-upgrade
+      args:
+        warn: false # don't warn us about apt having its own plugin
+      register: apt_simulate
+      changed_when: 0
 
+    # pick out list of pending updates from command output. This essentially
+    # takes the above output from "apt-get --simulate dist-upgrade", and
+    # pipes it through "cut -f2 -d' ' | sort"
+    - name: parse apt-get output to get list of changed packages
+      set_fact:
+        updates: '{{ apt_simulate.stdout_lines | select("match", "^Inst ") | list | splitpart(1, " ") | list | sort }}'
+      changed_when: 0
+
+    # tell user about packages being updated
+    - name: show pending updates
+      debug:
+        var: updates
+      when: updates.0 is defined
