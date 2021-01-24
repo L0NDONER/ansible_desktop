@@ -8,10 +8,9 @@
     package:
       name: 
         - htop
-        - tmux
         - opera
         - bitwarden
-
-
+  - name: Update apt repo and cache
+    apt: upgrade=dist force_apt_get=yes
 
 
