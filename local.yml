@@ -1,16 +1,8 @@
----
-- hosts: localhost
-  connection: local
+- name: Update and upgrade apt packages
   become: true
-
-  tasks:
-  - name: Install Packages
-    package:
-      name: 
-        - htop
-        - opera
-        - bitwarden
-  - name: Update apt repo and cache
-    apt: upgrade=dist force_apt_get=yes
+  apt:
+    upgrade: yes
+    update_cache: yes
+    cache_valid_time: 86400 #One day
 
 
