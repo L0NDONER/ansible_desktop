@@ -4,4 +4,4 @@ Used for the Ansible desktop configuration
 
 
 
-![Test Image 4](/home/martin/Pictures/ansible-red-cover.png)
+![Ansible logo](/download.png)
