@@ -10,4 +10,8 @@
         - htop
         - opera
         - bitwarden
-        - deluge
+  tasks:
+  - name: Make sure Nano is there
+    apt:
+      name: nano
+      state: latest
