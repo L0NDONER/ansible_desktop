@@ -11,8 +11,4 @@ Used for the Ansible desktop configuration
 
 
 
-<<<<<<< HEAD
-![Ansible logo](/download.png)
-=======
 ![Ansible Logo](/download.png)
->>>>>>> 8b4f8418d9672b100d838a5176f90fb95188be82
