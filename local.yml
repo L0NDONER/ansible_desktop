@@ -4,14 +4,14 @@
   become: true
 
   tasks:
-  - name: install packages
-    package:
-      name:
-        - htop
-        - opera
-        - bitwarden
-  tasks:
   - name: Make sure Nano is there
     apt:
       name: nano
       state: latest
+
+  tasks:
+   - name: Make sure Pihole is upto date
+     apt:
+     - name: TASK | pihole -up
+       service:
+         state: restarted
