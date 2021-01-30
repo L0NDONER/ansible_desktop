@@ -1,2 +1,8 @@
-pi@192.168.1.132
+# Example of setting a group of hosts to use Python3
+[py3-hosts]
+martin@192.168.1.132
 pi@192.168.1.124
+
+[py3-hosts:vars]
+ansible_python_interpreter=/usr/bin/python3
+
