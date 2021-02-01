@@ -5,6 +5,10 @@
     - name: Update and upgrade apt packages
       become: true
       apt:
-        upgrade: yes
+        upgrade: full
         update_cache: yes
-      vars:  
+       # cache_valid_time: 3600
+    - name: install "Latest desktop packages"
+      apt:
+        name: "*"
+        state: latest

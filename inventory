@@ -2,7 +2,8 @@
 [py3-hosts]
 martin@192.168.1.132
 pi@192.168.1.124
+127.0.0.1 ansible_connection=local
 
 [py3-hosts:vars]
 ansible_python_interpreter=/usr/bin/python3
-
+ansible_become_password=33$tevenage
