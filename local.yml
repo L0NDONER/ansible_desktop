@@ -12,3 +12,9 @@
       apt:
         name: "*"
         state: latest
+    
+#    -  name: Remove Armory
+#       apt:
+#         pkg: armory
+#         state: absent
+    
