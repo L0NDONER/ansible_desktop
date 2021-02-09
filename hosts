@@ -1,9 +1,8 @@
 [Pihole]
-pi-124
+pihole
 
 [Pi-132]
 pi-132 
 
-[Debbie]
-# 127.0.0.1
-local_host
+[Minty]
+localhost

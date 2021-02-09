@@ -1,11 +1,11 @@
 --- 
 - 
   become: true
+  gather_facts: true
   hosts: "*"
   tasks: 
     - 
       apt: 
         name: "*"
         state: latest
-      become: true
       name: "install \"Latest desktop packages\""
