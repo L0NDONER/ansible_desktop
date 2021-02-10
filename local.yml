@@ -9,6 +9,7 @@
         name: "*"
         state: latest
       name: "install \"Latest desktop packages\""
+      when: ansible_distribution in ["Debian", "Ubuntu", "Linux Mint", "raspberrypi"]
     -
       name: Reboot system if required
       command: shutdown -r now 'Rebooting to complete system upgrade' removes=/var/run/reboot-required
