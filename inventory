@@ -3,6 +3,7 @@
 pi-132
 pihole
 localhost ansible_connection=local
+pop
 
 [py3hosts:vars]
 ansible_python_interpreter=/usr/bin/python3
