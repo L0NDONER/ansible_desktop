@@ -1,0 +1,6 @@
+---
+- 
+  apt: 
+    autoremove: true
+    autoclean: true
+  name: "Remove dependencies that are no longer required"
