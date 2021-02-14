@@ -11,4 +11,5 @@
       name: "install \"Latest desktop packages\""
       when: "ansible_distribution in [\"Debian\", \"Ubuntu\", \"Linux Mint\", \"raspberrypi\", \"Pop!_OS\" ]"
     - 
-      include: var.yml
+      include: aptcleanup.yml
+
