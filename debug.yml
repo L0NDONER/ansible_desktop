@@ -1,0 +1,10 @@
+---
+-
+  name: List updated packages
+  shell: rpm -qa --last | grep "$(date +%a\ %d\ %b\ %Y)" |cut -f 1 -d " "
+  register: result
+  args:
+    warn: no
+-  
+  name: Updated packages
+  debug: msg="{{ result.stdout_lines }}"
