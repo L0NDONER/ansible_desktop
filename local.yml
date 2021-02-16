@@ -5,11 +5,12 @@
   hosts: "*"
   tasks: 
     - 
-      apt: 
+      package: 
         name: "*"
         state: latest
-      name: "install \"Latest desktop packages\""
+      name: "install latest desktop packages"
       when: "ansible_distribution in [\"Debian\", \"Ubuntu\", \"Linux Mint\", \"raspberrypi\", \"Pop!_OS\" ]"
     - 
       include: aptcleanup.yml
-
+    -
+      include: debug.yml
