@@ -1,3 +1,9 @@
+###########################################################
+#                                                         #
+#        Martin O'Flaherty first Ansible Playbook         #
+#                                                         #
+###########################################################
+
 --- 
 - 
   become: true
@@ -5,12 +11,12 @@
   hosts: "*"
   tasks: 
     - 
+      name: "install latest desktop packages"
       package: 
         name: "*"
         state: latest
-      name: "install latest desktop packages"
-      when: "ansible_distribution in [\"Debian\", \"Ubuntu\", \"Linux Mint\", \"raspberrypi\", \"Pop!_OS\" ]"
+      when: "ansible_distribution in [\"ubuntu\"]"
     - 
       include: aptcleanup.yml
-    -
+    - 
       include: debug.yml
