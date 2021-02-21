@@ -1,12 +1,7 @@
-[Pihole]
+[ubuntu]
+
 pihole
-
-[Pi-132]
 pi-132 
-
-[Minty]
 localhost
-
-[Poppy]
 Pop
 
