@@ -2,4 +2,4 @@
 - 
   name: Print all hosts
   ansible.builtin.debug:
-    var: ansible_host
+    var: ansible_host all
