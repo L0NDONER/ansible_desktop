@@ -1,9 +1,9 @@
 # Example of setting a group of hosts to use Python3
 [py3hosts]
-pi-132
-pihole
+192.168.1.170
+192.168.1.171
 localhost ansible_connection=local
-pop
+
 
 [py3hosts:vars]
 ansible_python_interpreter=/usr/bin/python3
