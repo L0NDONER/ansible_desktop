@@ -1,7 +1,6 @@
 [ubuntu]
-
-pihole
-pi-132 
+pi@192.168.1.171
+pi@192.168.1.170 
 localhost
-Pop
+
 
