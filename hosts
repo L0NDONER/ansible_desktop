@@ -1,8 +1,10 @@
-[ubuntu]
+[pi]
 
 pi@192.168.1.170
 pi@192.168.1.171
-l0ndoner@192.168.1.172
+
+[ubuntu]
+# l0ndoner@192.168.1.172
 localhost
 root@176.58.98.208
 
