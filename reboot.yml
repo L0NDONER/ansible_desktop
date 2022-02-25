@@ -1,6 +1,6 @@
 --- 
 - 
-  name: "Check if a reboot is needed on all servers"
+  name: "Check if a reboot is needed on servers"
   register: reboot_required_file
   stat: 
     get_md5: false
