@@ -16,7 +16,7 @@
     - name: Upgrade all packages on servers
       apt: upgrade=dist force_apt_get=yes
     
-    - name: pip self-update
+    - name: pip self-update so all up to date
       pip:
         name: pip
         state: latest
