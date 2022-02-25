@@ -1,11 +1,12 @@
 [pi]
 
-pi@192.168.1.170
-pi@192.168.1.171
+blackpi
+docker
+
 
 [ubuntu]
+
 # l0ndoner@192.168.1.172
-localhost
-root@176.58.98.208
+linode
 
 
