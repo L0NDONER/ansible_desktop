@@ -1,13 +1,15 @@
 # Example of setting a group of hosts to use Python3
 [pi]
+
 blackpi
 docker
-
-[ubuntu]
-# l0ndoner@192.168.1.172
-linode
 localhost ansible_connection=local
 
+[ubuntu]
+laptop
+
+[cloud]
+linode
 
 [pi:vars]
 ansible_python_interpreter=/usr/bin/python3
@@ -16,3 +18,8 @@ ansible_become_password=33$tevenage
 [ubuntu:vars]
 ansible_python_interpreter=/usr/bin/python3
 ansible_become_password=33$tevenage
+
+[cloud:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_become_password=33$tevenage
+
