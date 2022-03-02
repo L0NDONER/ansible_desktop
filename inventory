@@ -6,7 +6,7 @@ docker
 localhost ansible_connection=local
 
 [ubuntu]
-laptop
+#laptop
 
 [cloud]
 linode
