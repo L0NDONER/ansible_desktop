@@ -25,6 +25,9 @@
     pip:
       name: pip
       state: latest
+  -
+    name: Remove dependencies that are no longer required.
+    include: aptcleanup.yml
 
   - 
     name: Check if a reboot is needed on all servers
