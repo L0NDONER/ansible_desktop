@@ -3,10 +3,8 @@
 blackpi
 docker
 
-
 [ubuntu]
-
-laptop
+#laptop
 
 [cloud]
 
