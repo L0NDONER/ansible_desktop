@@ -1,15 +1,6 @@
 --- 
 - 
 
-# get a list of packages that have updates
-  - 
-    name: get list of pending upgrades
-    command: apt-get --simulate dist-upgrade
-    args:
-      warn: false # don't warn us about apt having its own plugin
-      register: apt_simulate
-      changed_when: 0
-
     # pick out list of pending updates from command output. This essentially
     # takes the above output from "apt-get --simulate dist-upgrade", and
     # pipes it through "cut -f2 -d' ' | sort"
