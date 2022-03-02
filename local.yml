@@ -1,38 +1,33 @@
+# -*- coding: utf-8 -*-
+
 ###########################################################
 #                                                         #
 #        Martin O'Flaherty first Ansible Playbook         #
 #                                                         #
 ###########################################################
 
----
--
-  hosts: "*"
-  ignore_unreachable: yes
+--- 
+- 
   become: true
-  become_user: root
-  tasks:
-
-  - 
-    name: Update apt repo and cache on all Debian/Ubuntu boxes
-    apt: update_cache=yes force_apt_get=yes cache_valid_time=3600
-
-  - 
-    name: Upgrade all packages on servers
-    apt: upgrade=dist force_apt_get=yes
-    
-  - 
-    name: pip self-update so all up to date
-    pip:
-      name: pip
-      state: latest
-  -
-    name: Remove dependencies that are no longer required.
-    include: aptcleanup.yml
-
-  - 
-    name: Check if a reboot is needed on all servers
-    register: reboot_required_file
-    stat: path=/var/run/reboot-required get_md5=no
-  - 
-    name: Reboot the box if kernel updated
-    include: reboot.yml
+  gather_facts: false
+  hosts: "*"
+  ignore_unreachable: true
+  tasks: 
+    - 
+      name: "Update apt repo and cache on all Debian/Ubuntu boxes"
+      package: "update_cache=yes force_apt_get=yes cache_valid_time=3600"
+    - 
+      name: "pip self-update so all up to date"
+      pip: 
+        name: pip
+        state: latest
+    - 
+      include: aptcleanup.yml
+      name: "Remove dependencies that are no longer required."
+    - 
+      name: "Check if a reboot is needed on all servers"
+      register: reboot_required_file
+      stat: "path=/var/run/reboot-required get_md5=no"
+    - 
+      include: reboot.yml
+      name: "Reboot the box if kernel updated"
