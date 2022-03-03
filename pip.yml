@@ -1,0 +1,6 @@
+---
+-
+  name: "pip self-update so all up to date"
+  pip: 
+    name: pip
+    state: latest
