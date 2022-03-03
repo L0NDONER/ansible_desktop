@@ -12,18 +12,16 @@
   gather_facts: false
   hosts: "*"
   ignore_unreachable: true
-  tasks: 
-    - 
-      name: "Update apt repo and cache on all Debian/Ubuntu boxes"
-      package: "update_cache=yes force_apt_get=yes cache_valid_time=3600"
-    - 
-      name: "pip self-update so all up to date"
-      pip: 
-        name: pip
-        state: latest
+  tasks:
+    -
+      include: update.yml
+      name: update apt servers
     - 
       include: aptcleanup.yml
       name: "Remove dependencies that are no longer required."
+    -
+      include: pip.yml
+      name: pip3 updates
     - 
       name: "Check if a reboot is needed on all servers"
       register: reboot_required_file
