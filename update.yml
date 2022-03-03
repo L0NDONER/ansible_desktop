@@ -1,0 +1,8 @@
+--- 
+-
+  name: install updates (Ubuntu)
+  package:
+    only_upgrade: yes
+    update_cache: yes
+    install_recommends: yes
+    cache_valid_time: 3600
