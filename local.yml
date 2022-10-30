@@ -27,5 +27,5 @@
       register: reboot_required_file
       stat: "path=/var/run/reboot-required get_md5=no"
     - 
-      #include: reboot.yml
-      #name: "Reboot the box if kernel updated"
+      include: reboot.yml
+      name: "Reboot the box if kernel updated"
