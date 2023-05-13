@@ -6,7 +6,7 @@ docker
 localhost ansible_connection=local
 
 [ubuntu]
-#laptop
+laptop
 
 [cloud]
 linode
@@ -22,4 +22,3 @@ ansible_become_password=33$tevenage
 [cloud:vars]
 ansible_python_interpreter=/usr/bin/python3
 ansible_become_password=33$tevenage
-
