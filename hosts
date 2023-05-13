@@ -1,11 +1,23 @@
 [ubuntu]
+laptop
 
+[pi_servers]
 blackpi
 docker
-#laptop
+
 
 [cloud]
-
 linode
 
 
+[pi_servers:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_become_password=33$tevenage
+
+[ubuntu_servers:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_become_password=33$tevenage
+
+[cloud_servers:vars]
+ansible_python_interpreter=/usr/bin/python3
+ansible_become_password=33$tevenage
