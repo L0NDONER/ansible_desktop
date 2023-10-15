@@ -1,5 +1,8 @@
 ---
 -
+  name: install pip3
+  apt: name=python3-pip state=present
+-
   name: "pip self-update so all up to date"
   pip: 
     name: pip
