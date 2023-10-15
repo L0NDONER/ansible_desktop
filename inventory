@@ -1,12 +1,14 @@
 # Example of setting a group of hosts to use Python3
-[pi]
 
-blackpi
-docker
+[local]
 localhost ansible_connection=local
 
 [ubuntu]
-#laptop
+docker
+
+[pi]
+#blackpi
+#docker
 
 [cloud]
 linode

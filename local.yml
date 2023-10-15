@@ -9,7 +9,7 @@
 --- 
 - 
   become: true
-  gather_facts: false
+  gather_facts: yes
   hosts: "*"
   ignore_unreachable: true
   tasks:
