@@ -9,8 +9,7 @@ docker
 [pi]
 #blackpi
 #docker
-=======
-laptop
+#laptop
 
 [cloud]
 linode
