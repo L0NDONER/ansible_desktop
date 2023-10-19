@@ -1,0 +1,4 @@
+---
+-
+  name: install python 
+  apt: name=python3 state=latest
