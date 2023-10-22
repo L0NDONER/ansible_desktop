@@ -12,24 +12,14 @@
   gather_facts: yes
   hosts: "*"
   ignore_unreachable: true
+    
   tasks:
-    -
-      include: update.yml
-      name: update apt servers
-    - 
-      include: aptcleanup.yml
-      name: "Remove dependencies that are no longer required."
-    -
-      include: pip.yml
-      name: pip3 updates
-    -
-      include: python.yml
-      name: python updates
+    - import_tasks: tasks/update.yml
+    - import_tasks: tasks/aptcleanup.yml
+    - import_tasks: tasks/pip.yml
+    - import_tasks: tasks/python.yml
+    - import_tasks: tasks/flatpaks update
     - 
       name: "Check if a reboot is needed on all servers"
       register: reboot_required_file
       stat: "path=/var/run/reboot-required get_md5=no"
-    -
-      include: flatpaks.yml
-      name: flatpaks update
-    
