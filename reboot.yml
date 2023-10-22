@@ -1,0 +1,18 @@
+--- 
+- 
+  name: "Check if a reboot is needed on servers"
+  register: reboot_required_file
+  stat: 
+    get_md5: false
+    path: /var/run/reboot-required
+- 
+  name: "Reboot the server if kernel updated"
+  reboot: 
+    connect_timeout: 5
+    msg: "Reboot initiated by Ansible for kernel updates"
+    post_reboot_delay: 30
+    pre_reboot_delay: 0
+    reboot_timeout: 300
+    test_command: uptime
+  when: reboot_required_file.stat.exists
+
