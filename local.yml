@@ -14,6 +14,7 @@
   ignore_unreachable: true
     
   tasks:
+    - import_tasks: tasks/users.yml
     - import_tasks: tasks/update.yml
     - import_tasks: tasks/aptcleanup.yml
     - import_tasks: tasks/pip.yml
