@@ -13,7 +13,7 @@
   hosts: "*"
   ignore_unreachable: true
   tasks:
-    - include: update.yml
+    - include_tasks: update.yml
     - include: aptcleanup.yml
     - include: pip.yml
     - include: python.yml
