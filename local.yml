@@ -2,25 +2,21 @@
 
 ###########################################################
 #                                                         #
-#       Martin O'Flaherty: Updated Ansible Playbook       #
-#                       Version 0.02                      #
+#       Martin O'Flaherty: Updated Ansible Pull           #
+#                       Version 0.001                     #
 ###########################################################
-
---- 
-- 
+- hosts: localhost
+  connection: local
   become: true
-  gather_facts: yes
-  hosts: "*"
-  ignore_unreachable: true
-    
+
+  pre_tasks:
+    - name: update repositories
+      apt:
+        update_cache: yes
+      changed_when: False
+
   tasks:
     - import_tasks: tasks/users.yml
-    - import_tasks: tasks/update.yml
-    - import_tasks: tasks/aptcleanup.yml
-    - import_tasks: tasks/pip.yml
-    - import_tasks: tasks/python.yml
-    - import_tasks: tasks/flatpaks update
-    - 
-      name: "Check if a reboot is needed on all servers"
-      register: reboot_required_file
-      stat: "path=/var/run/reboot-required get_md5=no"
+    - import_tasks: tasks/packages.yml
+    - import_tasks: tasks/cron.yml
+    - import_tasks: tasks/flatpaks.yml
