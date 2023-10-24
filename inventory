@@ -1,4 +1,5 @@
 # Example of setting a group of hosts to use Python3
+
 [local]
 localhost ansible_connection=local
 
