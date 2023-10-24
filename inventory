@@ -1,3 +1,11 @@
+## -*- coding: utf-8 -*-
+
+###########################################################
+#                                                         #
+#       Martin O'Flaherty: Updated Ansible Playbook       #
+#                       Version 0.02                      #
+###########################################################
+
 # Example of setting a group of hosts to use Python3
 
 [local]
