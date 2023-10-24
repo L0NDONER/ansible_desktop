@@ -3,10 +3,10 @@
 [local]
 localhost ansible_connection=local
 
-[ubuntu]
+# [ubuntu]
 #docker
 
-[pi]
+# [pi]
 #blackpi
 #docker
 #laptop
