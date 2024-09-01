@@ -3,7 +3,7 @@
   name: "Check if a reboot is needed on servers"
   register: reboot_required_file
   stat: 
-    get_md5: false
+    get_checksum: false
     path: /var/run/reboot-required
 - 
   name: "Reboot the server if kernel updated"
