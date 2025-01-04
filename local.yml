@@ -7,17 +7,20 @@
 ###########################################################
 
 --- 
-- 
+- name: Execute playbook tasks on all hosts
   become: true
   gather_facts: yes
-  hosts: "*"
+  hosts: all
   ignore_unreachable: true
   tasks:
-    - include: update.yml
-    - include: aptcleanup.yml
-    - include: pip.yml
-    - include: python.yml
-    - include: flatpaks.yml
-    - name: "Check if a reboot is needed on all servers"
+    - include_tasks: update.yml
+    - include_tasks: aptcleanup.yml
+    - include_tasks: pip.yml
+    - include_tasks: python.yml
+    - include_tasks: flatpaks.yml
+
+    - name: Check if a reboot is needed
+      stat:
+        path: /var/run/reboot-required
       register: reboot_required_file
-      stat: "path=/var/run/reboot-required get_md5=no"
+
