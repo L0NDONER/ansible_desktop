@@ -19,7 +19,7 @@
     - include_tasks: aptcleanup.yml
     - include_tasks: python.yml
     - include_tasks: flatpaks.yml
-    - include_tasks: pi.yml
+    - import_playbook: pi.yml
     - include_tasks: aws.yml
     - name: Check if a reboot is needed
       stat:
