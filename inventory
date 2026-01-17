@@ -1,15 +1,10 @@
-# Local machine
+# Local Ubuntu machine
 [ubuntu]
 localhost ansible_connection=local
 
-# Cloud servers
-[cloud]
-#linode
-
-# Raspberry Pi hosts (add your Pi hosts here when you get them)
+# Raspberry Pi hosts
 [pi]
 pihole ansible_host=10.0.0.122
-
 
 # Group variables
 [ubuntu:vars]
@@ -17,6 +12,5 @@ ansible_python_interpreter=/usr/bin/python3
 
 [pi:vars]
 ansible_python_interpreter=/usr/bin/python3
-
-[cloud:vars]
-ansible_python_interpreter=/usr/bin/python3
+ansible_user=martin
+ansible_ssh_private_key_file=/home/martin/.ssh/pi-hole
