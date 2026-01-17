@@ -1,10 +1,9 @@
 ---
-## -*- coding: utf-8 -*-
 ###########################################################
-#                                                         #
-#       Martin O'Flaherty: Ansible Playbook               #
-#                       Version 0.03                      #
+#        Martin O'Flaherty: Ansible Playbook              #
+#                Version 0.03                             #
 ###########################################################
+
 - name: Execute playbook tasks on Ubuntu hosts
   become: true
   gather_facts: yes
@@ -19,13 +18,19 @@
     - include_tasks: aptcleanup.yml
     - include_tasks: python.yml
     - include_tasks: flatpaks.yml
+    
+    # Use include_tasks ONLY if aws.yml is a list of tasks (no 'hosts:' line)
     - include_tasks: aws.yml
+
     - name: Check if a reboot is needed
       stat:
         path: /var/run/reboot-required
       register: reboot_required_file
+
     - name: Reboot the server if required
       reboot:
       when: reboot_required_file.stat.exists
-# Second, run the separate Pi playbook (This is the top-level fix)
-    - import_playbook: pi.yml
+
+# --- TOP LEVEL IMPORTS (Outside the Ubuntu play) ---
+
+- import_playbook: pi.yml
