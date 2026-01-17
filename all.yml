@@ -1,0 +1,3 @@
+---
+- import_playbook: local.yml
+- import_playbook: pi.yml
