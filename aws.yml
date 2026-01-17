@@ -2,7 +2,7 @@
 - name: Manage AWS VPN and Web Services
   hosts: vpn_servers
   become: yes
-  tasks:  # <--- THIS LINE WAS MISSING OR MISALIGNED
+  tasks:
     - name: Ensure Nginx is running on port 8080
       community.docker.docker_container:
         name: docker-nginx
@@ -10,17 +10,3 @@
         state: started
         published_ports:
           - "8080:80"
-
-    - name: Ensure wg-easy is running
-      community.docker.docker_container:
-        name: wg-easy
-        image: ghcr.io/wg-easy/wg-easy:15
-        state: started
-        env:
-          WG_HOST: "35.82.253.175"
-        published_ports:
-          - "51820:51820/udp"
-          - "51821:51821/tcp"
-        capabilities:
-          - NET_ADMIN
-          - SYS_MODULE
