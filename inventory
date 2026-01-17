@@ -1,19 +1,18 @@
-## -*- coding: utf-8 -*-
-
-###########################################################
-#                                                         #
-#       Martin O'Flaherty: Updated Ansible Playbook       #
-#                       Version 0.02                      #
-###########################################################
-
-# Example of setting a group of hosts to use Python3
-
-# Inventory file for Ansible playbooks
+# Local machine
 [local]
 localhost ansible_connection=local
 
+# Cloud servers
 [cloud]
 linode
+
+# Raspberry Pi hosts (add your Pi hosts here when you get them)
+[pi]
+# pi5 ansible_host=192.168.1.100
+
+# Group variables
+[local:vars]
+ansible_python_interpreter=/usr/bin/python3
 
 [pi:vars]
 ansible_python_interpreter=/usr/bin/python3
