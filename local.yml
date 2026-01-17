@@ -19,7 +19,6 @@
     - include_tasks: aptcleanup.yml
     - include_tasks: python.yml
     - include_tasks: flatpaks.yml
-    - import_playbook: pi.yml
     - include_tasks: aws.yml
     - name: Check if a reboot is needed
       stat:
@@ -28,3 +27,5 @@
     - name: Reboot the server if required
       reboot:
       when: reboot_required_file.stat.exists
+# Second, run the separate Pi playbook (This is the top-level fix)
+    - import_playbook: pi.yml
