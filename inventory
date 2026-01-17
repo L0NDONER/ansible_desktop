@@ -8,6 +8,7 @@
 
 # Example of setting a group of hosts to use Python3
 
+# Inventory file for Ansible playbooks
 [local]
 localhost ansible_connection=local
 
@@ -16,12 +17,9 @@ linode
 
 [pi:vars]
 ansible_python_interpreter=/usr/bin/python3
-@ansible_passwords.yml
 
 [ubuntu:vars]
 ansible_python_interpreter=/usr/bin/python3
-@ansible_passwords.yml
 
 [cloud:vars]
 ansible_python_interpreter=/usr/bin/python3
-@ansible_passwords.yml
