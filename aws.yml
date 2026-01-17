@@ -1,72 +1,21 @@
----
-- name: Manage AWS VPN and Web Services
-  hosts: vpn_servers
-  become: yes
-  vars:
-    elastic_ip: "35.82.253.175"
-    nginx_host_port: 8080
+- name: Ensure Nginx is running on port 8080
+  community.docker.docker_container:
+    name: docker-nginx
+    image: nginx:latest
+    state: started
+    published_ports:
+      - "8080:80"
 
-  tasks:
-    - name: Ensure Docker is running
-      service:
-        name: docker
-        state: started
-        enabled: yes
-
-    - name: Deploy Nginx Container on Port 8080
-      community.docker.docker_container:
-        name: docker-nginx
-        image: nginx:latest
-        state: started
-        restart_policy: always
-        published_ports:
-          - "{{ nginx_host_port }}:80"
-
-    - name: Deploy wg-easy (WireGuard Web UI)
-      community.docker.docker_container:
-        name: wg-easy
-        image: ghcr.io/wg-easy/wg-easy:15
-        state: started
-        restart_policy: always
-        published_ports:
-          - "51820:51820/udp"
-          - "51821:51821/tcp"
-        env:
-          WG_HOST: "{{ elastic_ip }}"
-          # You can add WG_PASSWORD: "your_password_here" 
-        capabilities:
-          - NET_ADMIN
-          - SYS_MODULE
-        sysctls:
-          net.ipv4.conf.all.src_valid_mark: 1
-          net.ipv4.ip_forward: 1
-
-    - name: Ensure Portainer is running
-      community.docker.docker_container:
-        name: serene_goldwasser
-        image: portainer/portainer-ce:latest
-        state: started
-        restart_policy: always
-        published_ports:
-          - "9000:9000"
-          - "9443:9443"
-        volumes:
-          - /var/run/docker.sock:/var/run/docker.sock
-          - portainer_data:/data
-
-    - name: Ensure n8n is running
-      community.docker.docker_container:
-        name: n8n
-        image: docker.n8n.io/n8nio/n8n
-        state: started
-        restart_policy: always
-        published_ports:
-          - "5678:5678"
-
-    - name: Remove unused containers
-      community.docker.docker_container:
-        name: "{{ item }}"
-        state: absent
-      loop:
-        - thirsty_davinci
-        - docker-nginx  # Removes old instance if it exists under old config
+- name: Ensure wg-easy is running
+  community.docker.docker_container:
+    name: wg-easy
+    image: ghcr.io/wg-easy/wg-easy:15
+    state: started
+    env:
+      WG_HOST: "35.82.253.175"
+    published_ports:
+      - "51820:51820/udp"
+      - "51821:51821/tcp"
+    capabilities:
+      - NET_ADMIN
+      - SYS_MODULE
