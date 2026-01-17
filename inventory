@@ -1,5 +1,5 @@
 # Local machine
-[local]
+[ubuntu]
 localhost ansible_connection=local
 
 # Cloud servers
@@ -11,13 +11,10 @@ linode
 # pi5 ansible_host=192.168.1.100
 
 # Group variables
-[local:vars]
+[ubuntu:vars]
 ansible_python_interpreter=/usr/bin/python3
 
 [pi:vars]
-ansible_python_interpreter=/usr/bin/python3
-
-[ubuntu:vars]
 ansible_python_interpreter=/usr/bin/python3
 
 [cloud:vars]
