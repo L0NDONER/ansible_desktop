@@ -1,3 +1,5 @@
+---
+
 ## -*- coding: utf-8 -*-
 
 ###########################################################
@@ -5,7 +7,7 @@
 #       Martin O'Flaherty: Updated Ansible Playbook       #
 #                       Version 0.02                      #
 ###########################################################
----
+
 - name: Execute playbook tasks on all hosts
   become: true
   gather_facts: yes
