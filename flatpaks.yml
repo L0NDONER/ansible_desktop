@@ -1,6 +1,8 @@
-
 # This task upgrades all Flatpaks non-interactively and checks for changes.
 - name: Upgrade all flatpaks
   ansible.builtin.command: flatpak update --noninteractive
   register: flatpak_update_output
-  changed_when: "'app/' in flatpak_update_output.stdout"
+  # Prevent the playbook from stopping if a specific flatpak (like chromium) fails
+  failed_when: false
+  # Mark as changed only if an actual update occurred
+  changed_when: "'app/' in flatpak_update_output.stdout or 'runtime/' in flatpak_update_output.stdout"
