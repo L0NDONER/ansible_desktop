@@ -4,7 +4,7 @@ localhost ansible_connection=local
 
 # Cloud servers
 [cloud]
-linode
+#linode
 
 # Raspberry Pi hosts (add your Pi hosts here when you get them)
 [pi]
