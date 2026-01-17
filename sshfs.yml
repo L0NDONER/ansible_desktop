@@ -1,0 +1,20 @@
+# sshfs.yml
+---
+- name: Install SSHFS
+  package:
+    name: sshfs
+    state: present
+
+- name: Create Pi mount point
+  file:
+    path: /home/martin/Pi
+    state: directory
+
+- name: Create mount script
+  copy:
+    dest: /home/martin/mount-pi.sh
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      sshfs pi:/ ~/Pi
+      echo "✅ Pi mounted!"
