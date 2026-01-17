@@ -7,8 +7,6 @@
 ###########################################################
 
 ---
----
----
 - name: Execute playbook tasks on all hosts
   become: true
   gather_facts: yes
