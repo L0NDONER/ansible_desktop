@@ -1,13 +1,4 @@
----
-## -*- coding: utf-8 -*-
-###########################################################
-#                                                         #
-#       Martin O'Flaherty: Pi Playbook                    #
-#                       Version 0.03                      #
-###########################################################
 - name: Execute playbook tasks on Pi hosts
-  become: true
-  gather_facts: yes
   hosts: pi
   ignore_unreachable: true
   vars_files:
