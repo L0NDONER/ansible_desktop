@@ -5,7 +5,6 @@
 #       Martin O'Flaherty: Updated Ansible Playbook       #
 #                       Version 0.02                      #
 ###########################################################
-
 ---
 - name: Execute playbook tasks on all hosts
   become: true
@@ -13,30 +12,15 @@
   hosts: all
   ignore_unreachable: true
   tasks:
-    # 1. Configure package sources
     - include_tasks: third-party-software.yml
-    
-    # 2. Update system packages
     - include_tasks: update.yml
-    
-    # 3. Clean up old packages
     - include_tasks: aptcleanup.yml
-    
-    # 4. Install Python tools
-    - include_tasks: pip.yml
-    
-    # 5. Configure Python environment
     - include_tasks: python.yml
-    
-    # 6. Update Flatpak applications
     - include_tasks: flatpaks.yml
-    
-    # 7. Conditional reboot
     - name: Check if a reboot is needed
       stat:
         path: /var/run/reboot-required
       register: reboot_required_file
-    
     - name: Reboot the server if required
       reboot:
       when: reboot_required_file.stat.exists
