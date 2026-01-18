@@ -1,0 +1,197 @@
+---
+###########################################################
+#    WireGuard Client Management (wg-easy)               #
+#    Manages clients in your existing wg-easy container  #
+###########################################################
+
+- name: Manage WireGuard Clients
+  hosts: aws
+  become: yes
+  vars:
+    wg_easy_container: "wg-easy"
+    wg_config_dir: "/etc/wireguard"
+    local_download_dir: "~/wireguard-clients"
+    
+    # Define your clients here - add or remove as needed
+    wireguard_clients:
+      - name: "martin-laptop"
+        enabled: true
+      - name: "martin-phone"
+        enabled: true
+      - name: "martin-tablet"
+        enabled: true
+      - name: "pihole-backup"
+        enabled: false  # Set to false to skip
+  
+  tasks:
+    - name: Ensure local download directory exists
+      file:
+        path: "{{ local_download_dir }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: no
+
+    - name: Check if wg-easy container is running
+      docker_container_info:
+        name: "{{ wg_easy_container }}"
+      register: wg_easy_info
+
+    - name: Fail if wg-easy is not running
+      fail:
+        msg: "wg-easy container is not running!"
+      when: not wg_easy_info.exists or wg_easy_info.container.State.Status != "running"
+
+    - name: Get current WireGuard clients from wg-easy
+      shell: |
+        docker exec {{ wg_easy_container }} wg show wg0 peers
+      register: current_peers
+      changed_when: false
+
+    - name: Display current peers
+      debug:
+        msg: "Current WireGuard peers: {{ current_peers.stdout_lines | length }} connected"
+
+    - name: Check WireGuard configuration directory
+      stat:
+        path: "{{ wg_config_dir }}"
+      register: wg_dir
+
+    - name: List existing client configs
+      find:
+        paths: "{{ wg_config_dir }}"
+        patterns: "*.conf"
+        excludes: "wg0.conf"
+      register: existing_configs
+      when: wg_dir.stat.exists
+
+    - name: Create backup of WireGuard configs
+      archive:
+        path: "{{ wg_config_dir }}"
+        dest: "/tmp/wireguard-backup-{{ ansible_date_time.date }}.tar.gz"
+        format: gz
+      when: wg_dir.stat.exists
+
+    - name: Fetch backup to local machine
+      fetch:
+        src: "/tmp/wireguard-backup-{{ ansible_date_time.date }}.tar.gz"
+        dest: "{{ local_download_dir }}/backup-{{ ansible_date_time.date }}.tar.gz"
+        flat: yes
+
+    - name: Export client configs from wg-easy data directory
+      shell: |
+        docker exec {{ wg_easy_container }} cat /etc/wireguard/{{ item.name }}.conf
+      loop: "{{ wireguard_clients }}"
+      when: item.enabled
+      register: client_configs
+      failed_when: false
+      changed_when: false
+
+    - name: Save client configs locally
+      copy:
+        content: "{{ item.stdout }}"
+        dest: "{{ local_download_dir }}/{{ item.item.name }}.conf"
+        mode: '0600'
+      loop: "{{ client_configs.results }}"
+      when: 
+        - item.stdout is defined
+        - item.stdout != ""
+      delegate_to: localhost
+      become: no
+
+    - name: Generate QR codes for configs
+      shell: |
+        if [ -f "{{ local_download_dir }}/{{ item.name }}.conf" ]; then
+          qrencode -t ansiutf8 < "{{ local_download_dir }}/{{ item.name }}.conf" > "{{ local_download_dir }}/{{ item.name }}.qr.txt"
+          echo "QR code saved for {{ item.name }}"
+        fi
+      loop: "{{ wireguard_clients }}"
+      when: 
+        - item.enabled
+        - "'phone' in item.name or 'tablet' in item.name"
+      delegate_to: localhost
+      become: no
+      register: qr_generation
+      changed_when: false
+
+    - name: Display summary
+      debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════╗
+          ║     WireGuard Client Management Summary             ║
+          ╚══════════════════════════════════════════════════════╝
+          
+          Container: {{ wg_easy_container }}
+          Status: {{ wg_easy_info.container.State.Status }}
+          Active Peers: {{ current_peers.stdout_lines | length }}
+          
+          Configurations downloaded to: {{ local_download_dir }}
+          
+          Enabled Clients:
+          {% for client in wireguard_clients %}
+          {% if client.enabled %}
+          ✓ {{ client.name }}
+          {% endif %}
+          {% endfor %}
+          
+          Next Steps:
+          1. Check configs: ls -la {{ local_download_dir }}
+          2. View QR codes: cat {{ local_download_dir }}/*.qr.txt
+          3. Deploy to devices using the .conf files
+          
+          To add a new client via wg-easy UI:
+          http://35.82.253.175:51821
+
+- name: Deploy WireGuard config to this machine (optional)
+  hosts: localhost
+  connection: local
+  become: yes
+  vars:
+    deploy_client_name: ""  # Set this to deploy, e.g., "martin-laptop"
+    
+  tasks:
+    - name: Skip deployment if no client specified
+      debug:
+        msg: "No client specified for deployment. Set deploy_client_name to deploy."
+      when: deploy_client_name == ""
+
+    - name: Install WireGuard
+      apt:
+        name:
+          - wireguard
+          - wireguard-tools
+          - resolvconf
+          - openresolv
+        state: present
+      when: 
+        - deploy_client_name != ""
+        - ansible_os_family == "Debian"
+
+    - name: Deploy client configuration
+      copy:
+        src: "~/wireguard-clients/{{ deploy_client_name }}.conf"
+        dest: "/etc/wireguard/{{ deploy_client_name }}.conf"
+        mode: '0600'
+        owner: root
+        group: root
+      when: deploy_client_name != ""
+
+    - name: Enable and start WireGuard
+      systemd:
+        name: "wg-quick@{{ deploy_client_name }}"
+        enabled: yes
+        state: started
+      when: deploy_client_name != ""
+
+    - name: Show WireGuard status
+      command: wg show
+      register: wg_status
+      changed_when: false
+      when: deploy_client_name != ""
+
+    - name: Display connection status
+      debug:
+        msg: "{{ wg_status.stdout_lines }}"
+      when: 
+        - deploy_client_name != ""
+        - wg_status.stdout_lines is defined
