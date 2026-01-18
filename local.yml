@@ -19,8 +19,6 @@
     - include_tasks: python.yml
     - include_tasks: flatpaks.yml
     
-    # Use include_tasks ONLY if aws.yml is a list of tasks (no 'hosts:' line)
-    - include_tasks: aws.yml
 
     - name: Check if a reboot is needed
       stat:
