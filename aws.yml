@@ -1,8 +1,13 @@
-# NO hosts line, NO tasks line
-- name: Ensure Nginx is running on port 8080
-  community.docker.docker_container:
-    name: docker-nginx
-    image: nginx:latest
-    state: started
-    published_ports:
-      - "8080:80"
+---
+- name: AWS EC2 Configuration
+  hosts: aws
+  become: yes
+  
+  tasks:
+    - name: Ensure Nginx is running on port 8080
+      community.docker.docker_container:
+        name: nginx
+        image: nginx:latest
+        state: started
+        ports:
+          - "8080:80"
