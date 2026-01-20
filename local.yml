@@ -32,4 +32,8 @@
 # --- TOP LEVEL IMPORTS (Outside the Ubuntu play) ---
 
 - import_playbook: pi.yml
-- import_playbook: aws.yml  # <--- Make sure this line exists!
+  tags: [pi]
+- import_playbook: aws.yml
+  tags: [aws]
+- import_playbook: wireguard-management.yml
+  tags: [wireguard, vpn]

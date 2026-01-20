@@ -1,0 +1,231 @@
+---
+###########################################################
+#    WireGuard Client Management (wg-easy)               #
+#    Works with wg-easy's SQLite database                #
+###########################################################
+
+- name: Manage WireGuard Clients via wg-easy
+  hosts: aws
+  become: yes
+  vars:
+    wg_easy_container: "wg-easy"
+    local_download_dir: "~/wireguard-clients"
+    wg_easy_volume: "/var/lib/docker/volumes/wg-easy_etc_wireguard/_data"
+    wg_easy_port: "51821"
+    # Set your AWS public IP here or define it in your inventory
+    aws_public_ip: "{{ ansible_host }}"
+    
+  tasks:
+    - name: Ensure local download directory exists
+      file:
+        path: "{{ local_download_dir }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      become: no
+
+    - name: Check if wg-easy container is running
+      docker_container_info:
+        name: "{{ wg_easy_container }}"
+      register: wg_easy_info
+
+    - name: Get WireGuard server public key
+      shell: |
+        docker exec {{ wg_easy_container }} wg show wg0 public-key
+      register: server_pubkey
+      changed_when: false
+
+    - name: Get current WireGuard peers
+      shell: |
+        docker exec {{ wg_easy_container }} wg show wg0 dump | tail -n +2
+      register: wg_peers
+      changed_when: false
+
+    - name: Parse peer information
+      set_fact:
+        peer_count: "{{ wg_peers.stdout_lines | length }}"
+        
+    - name: Display current status
+      debug:
+        msg: |
+          WireGuard Server Status:
+          - Container: {{ wg_easy_container }} ({{ wg_easy_info.container.State.Status }})
+          - Server Public Key: {{ server_pubkey.stdout }}
+          - Active Peers: {{ peer_count }}
+
+    - name: Backup wg-easy database
+      copy:
+        src: "{{ wg_easy_volume }}/wg-easy.db"
+        dest: "/tmp/wg-easy-backup-{{ ansible_date_time.date }}.db"
+        remote_src: yes
+        mode: '0600'
+
+    - name: Fetch database backup to local machine
+      fetch:
+        src: "/tmp/wg-easy-backup-{{ ansible_date_time.date }}.db"
+        dest: "{{ local_download_dir }}/wg-easy-backup-{{ ansible_date_time.date }}.db"
+        flat: yes
+
+    - name: Backup wg0.conf
+      copy:
+        src: "{{ wg_easy_volume }}/wg0.conf"
+        dest: "/tmp/wg0-backup-{{ ansible_date_time.date }}.conf"
+        remote_src: yes
+        mode: '0600'
+
+    - name: Fetch wg0.conf to local machine
+      fetch:
+        src: "/tmp/wg0-backup-{{ ansible_date_time.date }}.conf"
+        dest: "{{ local_download_dir }}/wg0-server-config.conf"
+        flat: yes
+
+    - name: Install sqlite3 in container (if needed)
+      shell: |
+        docker exec {{ wg_easy_container }} sh -c "command -v sqlite3 || apk add --no-cache sqlite"
+      register: sqlite_install
+      changed_when: "'Installing' in sqlite_install.stdout"
+      failed_when: false
+
+    - name: Extract client list from database
+      shell: |
+        docker exec {{ wg_easy_container }} sqlite3 /etc/wireguard/wg-easy.db \
+        "SELECT name, address, public_key, enabled FROM clients_table;"
+      register: client_list
+      changed_when: false
+      failed_when: false
+
+    - name: Display client information
+      debug:
+        msg: |
+          Clients in wg-easy database:
+          {{ client_list.stdout }}
+
+    - name: Create instructions file
+      copy:
+        content: |
+          ╔══════════════════════════════════════════════════════╗
+          ║     WireGuard (wg-easy) Management Guide            ║
+          ╚══════════════════════════════════════════════════════╝
+          
+          BACKUPS CREATED:
+          - Database: {{ local_download_dir }}/wg-easy-backup-{{ ansible_date_time.date }}.db
+          - Server Config: {{ local_download_dir }}/wg0-server-config.conf
+          
+          SERVER INFORMATION:
+          - Public Key: {{ server_pubkey.stdout }}
+          - Active Peers: {{ peer_count }}
+          
+          TO MANAGE CLIENTS:
+          
+          1. Via Web UI (Easiest):
+             http://{{ aws_public_ip }}:{{ wg_easy_port }}
+             - Add new clients
+             - Download configs
+             - View QR codes
+          
+          2. Via Command Line:
+             # List all clients
+             docker exec wg-easy sqlite3 /etc/wireguard/wg-easy.db "SELECT * FROM clients;"
+             
+             # Show active connections
+             docker exec wg-easy wg show wg0
+          
+          3. To extract a specific client config:
+             docker exec wg-easy cat /etc/wireguard/client_name.conf
+             (Note: wg-easy generates these on-the-fly from the database)
+          
+          CLIENTS FOUND:
+          {{ client_list.stdout }}
+          
+          NEXT STEPS:
+          1. Use the web UI at http://{{ aws_public_ip }}:{{ wg_easy_port }} to:
+             - Create new clients
+             - Download client configs
+             - Generate QR codes for mobile devices
+          
+          2. Deploy configs to your devices:
+             - Linux: Copy .conf to /etc/wireguard/
+             - Mobile: Scan QR code in WireGuard app
+          
+          Generated: {{ ansible_date_time.iso8601 }}
+        dest: "{{ local_download_dir }}/WIREGUARD-GUIDE.txt"
+      delegate_to: localhost
+      become: no
+
+    - name: Display summary
+      debug:
+        msg: |
+          ✓ Backup completed
+          ✓ Client list extracted
+          ✓ Files saved to: {{ local_download_dir }}
+          
+          Check the guide: cat {{ local_download_dir }}/WIREGUARD-GUIDE.txt
+          Manage clients at: http://{{ aws_public_ip }}:{{ wg_easy_port }}
+
+- name: Optional - Deploy WireGuard client to localhost
+  hosts: localhost
+  connection: local
+  become: yes
+  vars:
+    # Set this to the client name you want to deploy (leave empty to skip)
+    deploy_client_name: "Linuxmint"
+    # You'll need to manually download the .conf from wg-easy UI first
+    client_config_source: "~/wireguard-clients/{{ deploy_client_name }}.conf"
+    
+  tasks:
+    - name: Skip if no client specified
+      debug:
+        msg: "Skipping deployment - no client specified. Set deploy_client_name to deploy."
+      when: deploy_client_name == ""
+
+    - name: Install WireGuard
+      apt:
+        name:
+          - wireguard
+          - wireguard-tools
+          - resolvconf
+          - openresolv
+        state: present
+      when: 
+        - deploy_client_name != ""
+        - ansible_os_family == "Debian"
+
+    - name: Check if client config exists
+      stat:
+        path: "{{ client_config_source }}"
+      register: config_file
+      become: no
+      when: deploy_client_name != ""
+
+    - name: Deploy client configuration
+      copy:
+        src: "{{ client_config_source }}"
+        dest: "/etc/wireguard/{{ deploy_client_name }}.conf"
+        mode: '0600'
+        owner: root
+        group: root
+      when: 
+        - deploy_client_name != ""
+        - config_file.stat.exists
+
+    - name: Enable and start WireGuard
+      systemd:
+        name: "wg-quick@{{ deploy_client_name }}"
+        enabled: yes
+        state: started
+      when: 
+        - deploy_client_name != ""
+        - config_file.stat.exists
+
+    - name: Show WireGuard status
+      command: wg show
+      register: wg_status
+      changed_when: false
+      when: deploy_client_name != ""
+
+    - name: Display connection status
+      debug:
+        msg: "{{ wg_status.stdout_lines }}"
+      when: 
+        - deploy_client_name != ""
+        - wg_status.stdout_lines is defined
