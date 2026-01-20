@@ -1,30 +1,50 @@
 ---
 # Install Google Chrome
-- name: Add Google Chrome GPG key
-  apt_key:
+- name: Add Google Chrome GPG key (modern method)
+  ansible.builtin.get_url:
     url: https://dl.google.com/linux/linux_signing_key.pub
-    state: present
+    dest: /usr/share/keyrings/google-chrome-keyring.asc
+    mode: '0644'
 
 - name: Add Google Chrome repository
   apt_repository:
-    repo: "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main"
+    repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.asc] http://dl.google.com/linux/chrome/deb/ stable main"
     state: present
+    filename: google-chrome
 
 - name: Install Google Chrome
   package:
     name: google-chrome-stable
-    state: latest
+    state: present
 
 # Install Docker
-- name: Add Docker GPG key
-  apt_key:
+- name: Add Docker GPG key (modern method)
+  ansible.builtin.get_url:
     url: https://download.docker.com/linux/ubuntu/gpg
-    state: present
+    dest: /usr/share/keyrings/docker-keyring.asc
+    mode: '0644'
+
+- name: Get Ubuntu base codename for Linux Mint
+  shell: "grep CODENAME /etc/upstream-release/lsb-release | cut -d= -f2"
+  register: mint_ubuntu_base
+  changed_when: false
+  when: ansible_distribution == "Linux Mint"
+
+- name: Set Ubuntu codename variable for Linux Mint
+  set_fact:
+    ubuntu_codename: "{{ mint_ubuntu_base.stdout }}"
+  when: ansible_distribution == "Linux Mint"
+
+- name: Set Ubuntu codename variable for Ubuntu
+  set_fact:
+    ubuntu_codename: "{{ ansible_distribution_release }}"
+  when: ansible_distribution == "Ubuntu"
 
 - name: Add Docker repository
   apt_repository:
-    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-keyring.asc] https://download.docker.com/linux/ubuntu {{ ubuntu_codename }} stable"
     state: present
+    filename: docker
 
 - name: Install Docker
   package:
@@ -33,26 +53,62 @@
       - docker-ce-cli
       - containerd.io
       - docker-compose-plugin
-    state: latest
+    state: present
+
+- name: Ensure Docker service is running
+  systemd:
+    name: docker
+    state: started
+    enabled: yes
+
+- name: Add user to docker group
+  user:
+    name: "{{ ansible_user_id }}"
+    groups: docker
+    append: yes
 
 # Install Sublime Text
-- name: Add Sublime Text GPG key
-  apt_key:
+- name: Add Sublime Text GPG key (modern method)
+  ansible.builtin.get_url:
     url: https://download.sublimetext.com/sublimehq-pub.gpg
-    state: present
+    dest: /usr/share/keyrings/sublimehq-keyring.asc
+    mode: '0644'
 
 - name: Add Sublime Text repository
   apt_repository:
-    repo: "deb https://download.sublimetext.com/ apt/stable/"
+    repo: "deb [signed-by=/usr/share/keyrings/sublimehq-keyring.asc] https://download.sublimetext.com/ apt/stable/"
     state: present
+    filename: sublime-text
 
 - name: Install Sublime Text
   package:
     name: sublime-text
-    state: latest
+    state: present
 
-# Install Jellyfin
+# Install Jellyfin (safer method)
+- name: Create Jellyfin keyring directory
+  file:
+    path: /usr/share/keyrings
+    state: directory
+    mode: '0755'
+
+- name: Download Jellyfin GPG key
+  ansible.builtin.get_url:
+    url: https://repo.jellyfin.org/jellyfin_team.gpg.key
+    dest: /usr/share/keyrings/jellyfin-keyring.asc
+    mode: '0644'
+
 - name: Add Jellyfin repository
-  shell: curl https://repo.jellyfin.org/install-debuntu.sh | sudo bash
-  args:
-    creates: /etc/apt/sources.list.d/jellyfin.list
+  apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/jellyfin-keyring.asc] https://repo.jellyfin.org/ubuntu {{ ubuntu_codename }} main"
+    state: present
+    filename: jellyfin
+
+- name: Install Jellyfin
+  package:
+    name:
+      - jellyfin
+      - jellyfin-server
+      - jellyfin-web
+    state: present
+    update_cache: yes
