@@ -1,12 +1,12 @@
 ---
-- name: install Python3
-  package: 
-    name: python3 
-    state: latest
+# --- Python & System Tool Setup ---
 
-- name: install pip3
+- name: install Python3 and SQLite
   package: 
-    name: python3-pip 
+    name: 
+      - python3
+      - python3-pip
+      - sqlite3  # This must be here to prevent the "not found" error
     state: latest
 
 - name: install Python development packages
@@ -15,3 +15,28 @@
       - python3-dev
       - python3-venv
     state: latest
+
+# --- JellyLink Database Maintenance ---
+
+- name: "JELLYLINKS | Auto-empty processed media 'rubbish bin'"
+  ansible.builtin.shell: |
+    # Only run if the database file actually exists
+    if [ -f {{ jellylink_db_path | default('/home/martin/ansible_desktop/jellylink.db') }} ]; then
+      sqlite3 {{ jellylink_db_path | default('/home/martin/ansible_desktop/jellylink.db') }} \
+      "DELETE FROM processed_media WHERE processed_date < date('now', '-1 year');"
+    else
+      echo "Database not found, skipping."
+    fi
+  register: prune_result
+  changed_when: "'DELETE' in prune_result.stdout"
+  when: enable_jellyfin | default(false) | bool
+  tags: [maintenance, jellylink, python]
+
+- name: "JELLYLINKS | Reclaim disk space from database (VACUUM)"
+  ansible.builtin.shell: |
+    sqlite3 {{ jellylink_db_path | default('/home/martin/ansible_desktop/jellylink.db') }} "VACUUM;"
+  when: 
+    - enable_jellyfin | default(false) | bool
+    - prune_result is changed
+    - not prune_result.stdout is search("not found")
+  tags: [maintenance, jellylink, python]

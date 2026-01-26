@@ -1,12 +1,36 @@
 ---
 - name: Execute playbook tasks on Pi hosts
   hosts: pi
-  become: yes  # <--- THIS IS MISSING
-  ignore_unreachable: true
+  become: yes
+  gather_facts: no  # ← Speed optimization
   vars_files:
     - ansible_passwords.yml
+  
+  pre_tasks:
+    - name: Wait for Pi to be reachable
+      wait_for_connection:
+        timeout: 30
+      register: pi_connection
+      ignore_errors: yes
+    
+    - name: End play if Pi unreachable
+      meta: end_host
+      when: pi_connection is failed
+    
+    - name: Gather minimal facts (distribution only)
+      setup:
+        gather_subset:
+          - '!all'
+          - '!min'
+          - distribution
+      tags: [always]
+  
   tasks:
     - include_tasks: update.yml
+      tags: [update]
+    
     - include_tasks: aptcleanup.yml
+      tags: [cleanup]
+    
     - include_tasks: python.yml
-    # ... rest of your tasks
+      tags: [python]

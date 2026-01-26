@@ -1,7 +1,7 @@
 ---
 ###########################################################
 #        Martin O'Flaherty: Ansible Playbook              #
-#                Version 0.03                             #
+#                Version 0.04                             #
 ###########################################################
 
 - name: Execute playbook tasks on Ubuntu hosts
@@ -13,27 +13,42 @@
     - ansible_passwords.yml
   tasks:
     - include_tasks: third-party-software.yml
+      tags: [software]
+
     - include_tasks: sshfs.yml
+      tags: [sshfs, mounts]
+
     - include_tasks: update.yml
+      tags: [update, maintenance]
+
     - include_tasks: aptcleanup.yml
+      tags: [cleanup, maintenance]
+
+    # Added the python tag here so --tags python works for your desktop
     - include_tasks: python.yml
+      tags: [python, maintenance, jellylink]
+
     - include_tasks: flatpaks.yml
-    
+      tags: [flatpak]
 
     - name: Check if a reboot is needed
       stat:
         path: /var/run/reboot-required
       register: reboot_required_file
+      tags: [always] # 'always' ensures this runs even with specific tags
 
     - name: Reboot the server if required
       reboot:
       when: reboot_required_file.stat.exists
+      tags: [reboot]
 
 # --- TOP LEVEL IMPORTS (Outside the Ubuntu play) ---
 
 - import_playbook: pi.yml
-  tags: [pi]
+  tags: [pi, python] # Added python tag so Pi maintenance runs too
+
 - import_playbook: aws.yml
   tags: [aws]
+
 - import_playbook: wireguard-management.yml
   tags: [wireguard, vpn]

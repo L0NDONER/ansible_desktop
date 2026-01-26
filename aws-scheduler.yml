@@ -1,0 +1,224 @@
+---
+- name: AWS EC2 Instance Scheduler (Cost Optimization)
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  
+  vars:
+    instance_id: "i-03384ded168e412cd"
+    region: "us-west-2"
+    start_hour: 9   # 9am
+    stop_hour: 22   # 10pm
+    
+  tasks:
+    # ==========================================
+    # Pre-flight Checks
+    # ==========================================
+    - name: Check if AWS CLI is installed
+      command: aws --version
+      register: aws_check
+      failed_when: false
+      changed_when: false
+      tags: [always]
+    
+    - name: Fail if AWS CLI not found
+      fail:
+        msg: "AWS CLI not installed. Run: sudo apt install awscli"
+      when: aws_check.rc != 0
+      tags: [always]
+    
+    - name: Check AWS credentials
+      command: aws sts get-caller-identity --region {{ region }}
+      register: aws_identity
+      failed_when: false
+      changed_when: false
+      tags: [always]
+    
+    - name: Fail if AWS credentials not configured
+      fail:
+        msg: "AWS credentials not configured. Run: aws configure"
+      when: aws_identity.rc != 0
+      tags: [always]
+    
+    - name: Display current time
+      debug:
+        msg: "Current time: {{ ansible_date_time.hour }}:{{ ansible_date_time.minute }} ({{ ansible_date_time.tz }})"
+      tags: [always]
+    
+    # ==========================================
+    # Get Instance Status
+    # ==========================================
+    - name: Get current instance state
+      amazon.aws.ec2_instance_info:
+        instance_ids:
+          - "{{ instance_id }}"
+        region: "{{ region }}"
+      register: instance_info
+      tags: [always]
+    
+    - name: Set instance state fact
+      set_fact:
+        current_state: "{{ instance_info.instances[0].state.name }}"
+      when: instance_info.instances | length > 0
+      tags: [always]
+    
+    - name: Display current instance state
+      debug:
+        msg: "Instance {{ instance_id }} is currently: {{ current_state }}"
+      when: current_state is defined
+      tags: [always]
+    
+    # ==========================================
+    # Stop Instance (Evening)
+    # ==========================================
+    - name: Stop instance at {{ stop_hour }}:00 ({{ stop_hour - 12 }}pm)
+      block:
+        - name: Stop EC2 instance
+          amazon.aws.ec2_instance:
+            instance_ids:
+              - "{{ instance_id }}"
+            state: stopped
+            region: "{{ region }}"
+            wait: yes
+            wait_timeout: 300
+          register: stop_result
+        
+        - name: Confirm instance stopped
+          debug:
+            msg: "✅ Instance {{ instance_id }} stopped successfully at {{ ansible_date_time.hour }}:{{ ansible_date_time.minute }}"
+      
+      when:
+        - ansible_date_time.hour|int == stop_hour|int
+        - current_state is defined
+        - current_state == "running"
+      tags: [stop]
+    
+    - name: Skip stop - not scheduled time
+      debug:
+        msg: "⏭️  Skipping stop. Current hour: {{ ansible_date_time.hour }}, Stop hour: {{ stop_hour }}"
+      when:
+        - ansible_date_time.hour|int != stop_hour|int
+      tags: [stop]
+    
+    - name: Skip stop - already stopped
+      debug:
+        msg: "⏭️  Instance already stopped"
+      when:
+        - current_state is defined
+        - current_state != "running"
+        - ansible_date_time.hour|int == stop_hour|int
+      tags: [stop]
+    
+    # ==========================================
+    # Start Instance (Morning)
+    # ==========================================
+    - name: Start instance at {{ start_hour }}:00 ({{ start_hour }}am)
+      block:
+        - name: Start EC2 instance
+          amazon.aws.ec2_instance:
+            instance_ids:
+              - "{{ instance_id }}"
+            state: running
+            region: "{{ region }}"
+            wait: yes
+            wait_timeout: 300
+          register: start_result
+        
+        - name: Wait for instance to be fully running
+          amazon.aws.ec2_instance_info:
+            instance_ids:
+              - "{{ instance_id }}"
+            region: "{{ region }}"
+          register: running_check
+          until: running_check.instances[0].state.name == "running"
+          retries: 10
+          delay: 10
+        
+        - name: Confirm instance started
+          debug:
+            msg: "✅ Instance {{ instance_id }} started successfully at {{ ansible_date_time.hour }}:{{ ansible_date_time.minute }}"
+      
+      when:
+        - ansible_date_time.hour|int == start_hour|int
+        - current_state is defined
+        - current_state == "stopped"
+      tags: [start]
+    
+    - name: Skip start - not scheduled time
+      debug:
+        msg: "⏭️  Skipping start. Current hour: {{ ansible_date_time.hour }}, Start hour: {{ start_hour }}"
+      when:
+        - ansible_date_time.hour|int != start_hour|int
+      tags: [start]
+    
+    - name: Skip start - already running
+      debug:
+        msg: "⏭️  Instance already running"
+      when:
+        - current_state is defined
+        - current_state == "running"
+        - ansible_date_time.hour|int == start_hour|int
+      tags: [start]
+    
+    # ==========================================
+    # Manual Controls
+    # ==========================================
+    - name: Manual stop (use --tags manual-stop)
+      amazon.aws.ec2_instance:
+        instance_ids:
+          - "{{ instance_id }}"
+        state: stopped
+        region: "{{ region }}"
+        wait: yes
+      tags: [never, manual-stop]
+    
+    - name: Manual start (use --tags manual-start)
+      amazon.aws.ec2_instance:
+        instance_ids:
+          - "{{ instance_id }}"
+        state: running
+        region: "{{ region }}"
+        wait: yes
+      tags: [never, manual-start]
+    
+    - name: Manual restart (use --tags manual-restart)
+      amazon.aws.ec2_instance:
+        instance_ids:
+          - "{{ instance_id }}"
+        state: restarted
+        region: "{{ region }}"
+        wait: yes
+      tags: [never, manual-restart]
+    
+    # ==========================================
+    # Status Check
+    # ==========================================
+    - name: Get final instance state
+      amazon.aws.ec2_instance_info:
+        instance_ids:
+          - "{{ instance_id }}"
+        region: "{{ region }}"
+      register: final_info
+      tags: [status]
+    
+    - name: Display final status
+      debug:
+        msg: |
+          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          Instance Status Report
+          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          Instance ID: {{ instance_id }}
+          Region: {{ region }}
+          State: {{ final_info.instances[0].state.name }}
+          Public IP: {{ final_info.instances[0].public_ip_address | default('N/A - Instance stopped') }}
+          Private IP: {{ final_info.instances[0].private_ip_address }}
+          Type: {{ final_info.instances[0].instance_type }}
+          Launch Time: {{ final_info.instances[0].launch_time }}
+          
+          Schedule:
+          - Start: {{ start_hour }}:00 ({{ start_hour }}am)
+          - Stop: {{ stop_hour }}:00 ({{ stop_hour - 12 }}pm)
+          
+          Current Time: {{ ansible_date_time.hour }}:{{ ansible_date_time.minute }} {{ ansible_date_time.tz }}
+          ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      tags: [status]

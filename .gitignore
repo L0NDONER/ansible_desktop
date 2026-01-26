@@ -1,2 +1,6 @@
 *.backup
 inventory
+.vault_pass
+.vault_pass
+*.old
+ansible_passwords.yml

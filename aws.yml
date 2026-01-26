@@ -1,13 +1,409 @@
 ---
-- name: AWS EC2 Configuration
+###########################################################
+#    AWS EC2 Infrastructure with SSL/TLS                 #
+#    WireGuard VPN + Nginx Reverse Proxy + LetsEncrypt   #
+###########################################################
+
+- name: AWS EC2 Infrastructure Configuration
   hosts: aws
   become: yes
+  gather_facts: yes
+  vars_files:
+    - ansible_passwords.yml
+  
+  vars:
+    # Configuration
+    domain_name: "flaz.duckdns.org"
+    duckdns_token: "{{ vault_duckdns_token }}"
+    admin_email: "oflaherty@gmail.com"
+    wireguard_password_hash: "{{ vault_wireguard_password_hash }}"
+    
+    # Firewall rules
+    allowed_ssh_ips:
+      - "0.0.0.0/0"
+    
+  pre_tasks:
+    - name: Wait for EC2 to be reachable
+      wait_for_connection:
+        timeout: 30
+      register: ec2_connection
+      ignore_errors: yes
+    
+    - name: End play if EC2 unreachable
+      meta: end_host
+      when: ec2_connection is failed
   
   tasks:
-    - name: Ensure Nginx is running on port 8080
-      community.docker.docker_container:
-        name: nginx
-        image: nginx:latest
+    # ==========================================
+    # System Setup
+    # ==========================================
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      tags: [system]
+    
+    - name: Install required packages
+      apt:
+        name:
+          - nginx
+          - ufw
+          - fail2ban
+          - unattended-upgrades
+          - docker.io
+          - certbot
+          - python3-certbot-nginx
+        state: present
+      tags: [system, security]
+
+    - name: Ensure Docker service is running
+      systemd:
+        name: docker
         state: started
+        enabled: yes
+      tags: [docker]
+
+    # ==========================================
+    # DNS & Networking
+    # ==========================================
+    - name: "DNS | Update DuckDNS IP"
+      uri:
+        url: "https://www.duckdns.org/update?domains=flaz&token={{ duckdns_token | trim }}&ip={{ ansible_host }}"
+        return_content: yes
+      register: duckdns_result
+      tags: [dns]
+    
+    - name: "DNS | Verify DuckDNS update"
+      debug:
+        msg: "DuckDNS update: {{ duckdns_result.content }}"
+      tags: [dns]
+
+    # ==========================================
+    # WireGuard (wg-easy) Configuration
+    # ==========================================
+    - name: Stop existing WireGuard container
+      community.docker.docker_container:
+        name: wg-easy
+        state: absent
+      tags: [wireguard]
+      ignore_errors: yes
+
+    - name: Deploy WireGuard (wg-easy) container
+      community.docker.docker_container:
+        name: wg-easy
+        image: ghcr.io/wg-easy/wg-easy:latest
+        state: started
+        restart_policy: unless-stopped
+        capabilities:
+          - NET_ADMIN
+          - SYS_MODULE
+        sysctls:
+          net.ipv4.conf.all.src_valid_mark: "1"
+          net.ipv4.ip_forward: "1"
+        volumes:
+          - /etc/wireguard:/etc/wireguard
         ports:
-          - "8080:80"
+          - "51821:51821/tcp"
+          - "51820:51820/udp"
+        env:
+          WG_HOST: "{{ domain_name }}"
+          PASSWORD_HASH: "{{ wireguard_password_hash }}"
+          WG_DEFAULT_DNS: "1.1.1.1,1.0.0.1"
+      tags: [docker, wireguard]
+
+    # ==========================================
+    # Nginx Configuration
+    # ==========================================
+    - name: Check if SSL certificate exists
+      stat:
+        path: "/etc/letsencrypt/live/{{ domain_name }}/fullchain.pem"
+      register: ssl_cert
+      tags: [nginx, ssl]
+    
+    - name: Configure Nginx - HTTP only (for initial cert request)
+      copy:
+        dest: /etc/nginx/sites-available/default
+        content: |
+          server {
+              listen 80;
+              server_name {{ domain_name }};
+              
+              # LetsEncrypt challenge
+              location /.well-known/acme-challenge/ {
+                  root /var/www/html;
+              }
+              
+              # Proxy to WireGuard
+              location / {
+                  proxy_pass http://127.0.0.1:51821;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              }
+          }
+        mode: '0644'
+      when: not ssl_cert.stat.exists
+      notify: restart nginx
+      tags: [nginx]
+    
+    - name: Configure Nginx - HTTPS with redirect
+      copy:
+        dest: /etc/nginx/sites-available/default
+        content: |
+          # HTTP - redirect to HTTPS
+          server {
+              listen 80;
+              server_name {{ domain_name }};
+              
+              # LetsEncrypt challenge (needed for renewals)
+              location /.well-known/acme-challenge/ {
+                  root /var/www/html;
+              }
+              
+              # Redirect everything else to HTTPS
+              location / {
+                  return 301 https://$server_name$request_uri;
+              }
+          }
+          
+          # HTTPS - proxy to WireGuard
+          server {
+              listen 443 ssl http2;
+              server_name {{ domain_name }};
+              
+              # SSL Configuration
+              ssl_certificate /etc/letsencrypt/live/{{ domain_name }}/fullchain.pem;
+              ssl_certificate_key /etc/letsencrypt/live/{{ domain_name }}/privkey.pem;
+              
+              # Modern SSL configuration
+              ssl_protocols TLSv1.2 TLSv1.3;
+              ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
+              ssl_prefer_server_ciphers off;
+              
+              # HSTS
+              add_header Strict-Transport-Security "max-age=63072000" always;
+              
+              # Proxy to WireGuard web UI
+              location / {
+                  proxy_pass http://127.0.0.1:51821;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+        mode: '0644'
+      when: ssl_cert.stat.exists
+      notify: restart nginx
+      tags: [nginx, ssl]
+
+    - name: Ensure Nginx is running
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+      tags: [nginx]
+
+    # ==========================================
+    # SSL Certificate Management
+    # ==========================================
+    - name: Setup automatic certificate renewal
+      cron:
+        name: "Renew LetsEncrypt certificates"
+        minute: "0"
+        hour: "3"
+        job: "certbot renew --quiet --post-hook 'systemctl reload nginx'"
+      when: ssl_cert.stat.exists
+      tags: [ssl, maintenance]
+
+    # ==========================================
+    # Firewall Configuration
+    # ==========================================
+    - name: Configure UFW - Allow SSH (rate limited)
+      ufw:
+        rule: limit
+        port: '22'
+        proto: tcp
+      tags: [firewall]
+
+    - name: Configure UFW - Allow HTTP/HTTPS
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - '80'
+        - '443'
+      tags: [firewall]
+
+    - name: Configure UFW - Allow WireGuard VPN
+      ufw:
+        rule: allow
+        port: '51820'
+        proto: udp
+      tags: [firewall]
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+        policy: deny
+        logging: 'on'
+      tags: [firewall]
+
+    # ==========================================
+    # Security Hardening
+    # ==========================================
+    - name: Configure fail2ban for SSH protection
+      copy:
+        dest: /etc/fail2ban/jail.local
+        content: |
+          [DEFAULT]
+          bantime = 3600
+          findtime = 600
+          maxretry = 5
+          
+          [sshd]
+          enabled = true
+          port = 22
+          logpath = /var/log/auth.log
+          
+          [nginx-http-auth]
+          enabled = true
+          port = http,https
+          logpath = /var/log/nginx/error.log
+        mode: '0644'
+      notify: restart fail2ban
+      tags: [security]
+    
+    - name: Ensure fail2ban is running
+      systemd:
+        name: fail2ban
+        state: started
+        enabled: yes
+      tags: [security]
+    
+    - name: Configure automatic security updates
+      copy:
+        dest: /etc/apt/apt.conf.d/50unattended-upgrades
+        content: |
+          Unattended-Upgrade::Allowed-Origins {
+              "${distro_id}:${distro_codename}-security";
+              "${distro_id}ESMApps:${distro_codename}-apps-security";
+              "${distro_id}ESM:${distro_codename}-infra-security";
+          };
+          Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+          Unattended-Upgrade::Remove-Unused-Dependencies "true";
+          Unattended-Upgrade::Automatic-Reboot "true";
+          Unattended-Upgrade::Automatic-Reboot-Time "03:00";
+        mode: '0644'
+      tags: [security, updates]
+
+    # ==========================================
+    # Maintenance & Backups
+    # ==========================================
+    - name: Setup weekly DuckDNS keep-alive
+      cron:
+        name: "Keep DuckDNS active"
+        minute: "0"
+        hour: "2"
+        weekday: "0"
+        job: "curl -s 'https://www.duckdns.org/update?domains=flaz&token={{ duckdns_token | trim }}&ip={{ ansible_host }}'"
+      tags: [dns, maintenance]
+
+    - name: Ensure WireGuard backup directory exists
+      file:
+        path: /home/ubuntu/backups
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0700'
+      tags: [backup]
+
+    - name: Setup automated WireGuard config backups
+      cron:
+        name: "Backup WireGuard configs"
+        minute: "0"
+        hour: "2"
+        job: "tar czf /home/ubuntu/backups/wireguard-$(date +\\%Y\\%m\\%d).tar.gz -C /etc/wireguard ."
+      tags: [backup]
+    
+    - name: Setup backup cleanup (keep last 7 days)
+      cron:
+        name: "Cleanup old backups"
+        minute: "30"
+        hour: "2"
+        job: "find /home/ubuntu/backups -name 'wireguard-*.tar.gz' -mtime +7 -delete"
+      tags: [backup]
+
+    # ==========================================
+    # Health Checks
+    # ==========================================
+    - name: Wait for WireGuard to be ready
+      wait_for:
+        port: 51821
+        timeout: 30
+      tags: [health]
+
+    - name: Verify Nginx is responding
+      uri:
+        url: "http://localhost"
+        status_code: [200, 301, 302]
+        timeout: 5
+      register: nginx_health
+      failed_when: false
+      changed_when: false
+      tags: [health]
+
+    - name: Display Nginx health
+      debug:
+        msg: "✅ Nginx is healthy"
+      when: nginx_health.status in [200, 301, 302]
+      tags: [health]
+    
+    - name: Check WireGuard container status
+      command: docker ps --filter name=wg-easy
+      register: wg_status
+      changed_when: false
+      tags: [health]
+    
+    - name: Display WireGuard status
+      debug:
+        msg: "✅ WireGuard container running"
+      when: "'wg-easy' in wg_status.stdout and 'Up' in wg_status.stdout"
+      tags: [health]
+    
+    - name: Get active WireGuard connections
+      command: docker exec wg-easy wg show wg0
+      register: wg_connections
+      changed_when: false
+      failed_when: false
+      tags: [health]
+    
+    - name: Display active VPN connections
+      debug:
+        msg: "{{ wg_connections.stdout_lines }}"
+      when: wg_connections.rc == 0
+      tags: [health]
+    
+    - name: Display deployment summary
+      debug:
+        msg:
+          - "================================"
+          - "AWS Infrastructure Deployed!"
+          - "================================"
+          - "Domain: https://{{ domain_name }}"
+          - "WireGuard VPN: {{ domain_name }}:51820"
+          - "SSL Status: {{ 'Enabled ✅' if ssl_cert.stat.exists else 'Pending ⚠️' }}"
+          - "================================"
+      tags: [always]
+  
+  handlers:
+    - name: restart nginx
+      service:
+        name: nginx
+        state: restarted
+
+    - name: restart fail2ban
+      service:
+        name: fail2ban
+        state: restarted

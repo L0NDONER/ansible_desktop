@@ -1,0 +1,177 @@
+---
+- name: WireGuard VPN Configuration
+  hosts: aws
+  become: yes
+  gather_facts: yes
+  vars_files:
+    - ansible_passwords.yml
+  vars:
+    # WireGuard configuration
+    wireguard_password_hash: "{{ vault_wireguard_password_hash }}"
+    wireguard_vpn_port: "51822"
+    wireguard_web_port: "51821"
+  
+  tasks:
+    # ==========================================
+    # Docker Setup
+    # ==========================================
+    - name: Install Docker if not present
+      apt:
+        name: docker.io
+        state: present
+        update_cache: yes
+      tags: [docker]
+    
+    - name: Ensure Docker service is running
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+      tags: [docker]
+    
+    # ==========================================
+    # WireGuard (wg-easy) Configuration
+    # ==========================================
+    - name: Configure kernel parameters for WireGuard
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+      loop:
+        - { name: 'net.ipv4.conf.all.src_valid_mark', value: '1' }
+        - { name: 'net.ipv4.ip_forward', value: '1' }
+      tags: [wireguard, system]
+    
+    - name: Stop existing wg-easy container (if any)
+      community.docker.docker_container:
+        name: wg-easy
+        state: absent
+      tags: [wireguard]
+      ignore_errors: yes
+    
+    - name: Deploy WireGuard (wg-easy) container with host network
+      community.docker.docker_container:
+        name: wg-easy
+        image: ghcr.io/wg-easy/wg-easy:latest
+        state: started
+        restart_policy: unless-stopped
+        network_mode: host
+        capabilities:
+          - NET_ADMIN
+          - SYS_MODULE
+        volumes:
+          - /etc/wireguard:/etc/wireguard
+        env:
+          WG_HOST: "{{ ansible_host }}"
+          PASSWORD_HASH: "{{ wireguard_password_hash }}"
+          WG_DEFAULT_DNS: "1.1.1.1,1.0.0.1"
+          WG_PORT: "{{ wireguard_vpn_port }}"
+          WG_DEFAULT_ADDRESS: "10.8.0.x"
+          PORT: "{{ wireguard_web_port }}"
+      tags: [wireguard]
+    
+    # ==========================================
+    # Firewall Configuration
+    # ==========================================
+    - name: Install UFW
+      apt:
+        name: ufw
+        state: present
+      tags: [firewall]
+    
+    - name: Configure UFW - Allow WireGuard Web UI
+      ufw:
+        rule: allow
+        port: "{{ wireguard_web_port }}"
+        proto: tcp
+      tags: [firewall]
+    
+    - name: Configure UFW - Allow WireGuard VPN
+      ufw:
+        rule: allow
+        port: "{{ wireguard_vpn_port }}"
+        proto: udp
+      tags: [firewall]
+    
+    - name: Enable UFW (if not already enabled)
+      ufw:
+        state: enabled
+        logging: 'on'
+      tags: [firewall]
+    
+    # ==========================================
+    # Backup Configuration
+    # ==========================================
+    - name: Ensure WireGuard backup directory exists
+      file:
+        path: /home/ubuntu/backups
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0700'
+      tags: [backup]
+    
+    - name: Setup automated WireGuard config backups
+      cron:
+        name: "Backup WireGuard configs"
+        minute: "0"
+        hour: "2"
+        job: "tar czf /home/ubuntu/backups/wireguard-$(date +\\%Y\\%m\\%d).tar.gz -C /etc/wireguard ."
+      tags: [backup]
+    
+    - name: Setup backup cleanup (keep last 7 days)
+      cron:
+        name: "Cleanup old backups"
+        minute: "30"
+        hour: "2"
+        job: "find /home/ubuntu/backups -name 'wireguard-*.tar.gz' -mtime +7 -delete"
+      tags: [backup]
+    
+    # ==========================================
+    # Health Checks
+    # ==========================================
+    - name: Wait for WireGuard container to be ready
+      wait_for:
+        port: "{{ wireguard_web_port }}"
+        delay: 5
+        timeout: 30
+      tags: [health]
+    
+    - name: Check WireGuard container status
+      command: docker ps --filter name=wg-easy
+      register: wg_status
+      changed_when: false
+      tags: [health]
+    
+    - name: Display WireGuard status
+      debug:
+        msg: "✅ WireGuard container running"
+      when: "'wg-easy' in wg_status.stdout"
+      tags: [health]
+    
+    - name: Get WireGuard interface info
+      command: docker exec wg-easy wg show wg0
+      register: wg_info
+      changed_when: false
+      failed_when: false
+      tags: [health]
+    
+    - name: Display WireGuard interface details
+      debug:
+        msg: "{{ wg_info.stdout_lines }}"
+      when: wg_info.rc == 0
+      tags: [health]
+    
+    - name: Display access information
+      debug:
+        msg:
+          - "================================"
+          - "WireGuard VPN Successfully Deployed!"
+          - "================================"
+          - "Web UI: http://{{ ansible_host }}:{{ wireguard_web_port }}"
+          - "VPN Port: {{ wireguard_vpn_port }}/udp"
+          - "Password: (from vault)"
+          - "Network Mode: host (direct network access)"
+          - "================================"
+      tags: [health]
