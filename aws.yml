@@ -7,10 +7,7 @@
 - name: AWS EC2 Infrastructure Configuration
   hosts: aws
   become: yes
-  gather_facts: yes
-  vars_files:
-    - ansible_passwords.yml
-  
+  gather_facts: yes  
   vars:
     # Configuration
     domain_name: "flaz.duckdns.org"

@@ -3,8 +3,7 @@
   hosts: aws
   become: yes
   gather_facts: yes
-  vars_files:
-    - ansible_passwords.yml
+  
   vars:
     # WireGuard configuration
     wireguard_password_hash: "{{ vault_wireguard_password_hash }}"
