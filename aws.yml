@@ -47,7 +47,7 @@
           - ufw
           - fail2ban
           - unattended-upgrades
-          - docker.io
+          # Docker is installed via third-party-software.yml (Docker CE, not docker.io)
           - certbot
           - python3-certbot-nginx
         state: present

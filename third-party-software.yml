@@ -17,7 +17,32 @@
     name: google-chrome-stable
     state: present
 
-# Install Docker
+# --- DOCKER SECTION: THE FIX ---
+# This removes the blockers for WireGuard-safe container management
+- name: Purge conflicting Ubuntu-native container packages
+  apt:
+    name:
+      - docker.io
+      - docker-doc
+      - docker-compose
+      - docker-compose-v2
+      - podman-docker
+      - containerd
+      - runc
+    state: absent
+    purge: yes
+    autoremove: yes
+
+- name: Remove any remaining Docker-related packages
+  shell: dpkg -l | grep -i docker | awk '{print $2}' | xargs -r apt-get purge -y
+  ignore_errors: yes
+  changed_when: false
+
+- name: Clean up apt cache after removals
+  apt:
+    autoclean: yes
+    autoremove: yes
+
 - name: Add Docker GPG key (modern method)
   ansible.builtin.get_url:
     url: https://download.docker.com/linux/ubuntu/gpg
@@ -46,14 +71,15 @@
     state: present
     filename: docker
 
-- name: Install Docker
-  package:
+- name: Install Official Docker Engine
+  apt:
     name:
       - docker-ce
       - docker-ce-cli
       - containerd.io
       - docker-compose-plugin
     state: present
+    update_cache: yes
 
 - name: Ensure Docker service is running
   systemd:
@@ -66,6 +92,7 @@
     name: "{{ ansible_user_id }}"
     groups: docker
     append: yes
+# --- END DOCKER SECTION ---
 
 # Install Sublime Text
 - name: Add Sublime Text GPG key (modern method)
@@ -85,7 +112,7 @@
     name: sublime-text
     state: present
 
-# Install Jellyfin (safer method)
+# Install Jellyfin
 - name: Create Jellyfin keyring directory
   file:
     path: /usr/share/keyrings
