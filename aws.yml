@@ -115,7 +115,7 @@
       stat:
         path: "/etc/letsencrypt/live/{{ domain_name }}/fullchain.pem"
       register: ssl_cert
-      tags: [nginx, ssl]
+      tags: [always]
     
     - name: Configure Nginx - HTTP only (for initial cert request)
       copy:
