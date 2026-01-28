@@ -1,20 +1,70 @@
-# sshfs.yml
 ---
-- name: Install SSHFS
-  package:
-    name: sshfs
-    state: present
+- name: Setup Robust SSHFS Mount
+  hosts: localhost
+  become: no
+  vars:
+    remote_host: "pi"
+    remote_path: "/"
+    local_mount_point: "/home/martin/Pi"
+    ssh_user: "martin"
+    identity_file: "/home/martin/.ssh/pi-hole"
 
-- name: Create Pi mount point
-  file:
-    path: /home/martin/Pi
-    state: directory
+  tasks:
+    - name: Check if Pi is reachable on the network
+      wait_for:
+        host: "{{ remote_host }}"
+        port: 22
+        timeout: 5
+      register: pi_reachable
+      ignore_errors: yes
 
-- name: Create mount script
-  copy:
-    dest: /home/martin/mount-pi.sh
-    mode: '0755'
-    content: |
-      #!/bin/bash
-      sshfs pi:/ ~/Pi
-      echo "✅ Pi mounted!"
+    - name: Ensure SSHFS and fuse are installed
+      package:
+        name: 
+          - sshfs
+          - fuse3
+        state: present
+      become: yes
+      when: pi_reachable is success
+
+    - name: Check if mount point is already mounted
+      shell: mountpoint -q "{{ local_mount_point }}"
+      register: is_mounted
+      failed_when: false
+      changed_when: false
+      when: pi_reachable is success
+
+    - name: Unmount if already mounted (for clean remount)
+      command: fusermount -u "{{ local_mount_point }}"
+      when: 
+        - pi_reachable is success
+        - is_mounted.rc == 0
+      failed_when: false
+
+    - name: Mount Pi via SSHFS
+      command: >
+        sshfs {{ ssh_user }}@{{ remote_host }}:{{ remote_path }} {{ local_mount_point }}
+        -o IdentityFile={{ identity_file }}
+        -o reconnect
+        -o ServerAliveInterval=15
+      when: 
+        - pi_reachable is success
+        - is_mounted.rc != 0
+      register: mount_result
+
+    - name: Create convenient unmount alias
+      lineinfile:
+        path: /home/martin/.bashrc
+        line: "alias unmount-pi='fusermount -u {{ local_mount_point }}'"
+        state: present
+
+    - name: Provide status feedback
+      debug:
+        msg: "✅ Pi is online. Mount is active at {{ local_mount_point }}."
+      when: 
+        - pi_reachable is success
+
+    - name: Alert if Pi is offline
+      debug:
+        msg: "❌ Pi is unreachable. Skipping mount to avoid hanging."
+      when: pi_reachable is failed

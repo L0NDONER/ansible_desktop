@@ -1,54 +1,72 @@
 ---
 ###########################################################
-#        Martin O'Flaherty: Ansible Playbook              #
-#                Version 0.04                             #
+#        Martin O'Flaherty: Ansible Master Playbook       #
+###########################################################
+# Version History:
+# 0.01 - Initial script
+# 0.02 - Added modular task includes
+# 0.03 - Integrated Ansible Vault for secrets
+# 0.04 - Hardened SSH, added 'Stay Out' banner, and 
+#        synced AWS/Tailscale orchestration
+# 0.05 - Fixed sshfs.yml import structure
 ###########################################################
 
 - name: Execute playbook tasks on Ubuntu hosts
-  become: true
-  gather_facts: yes
-  hosts: ubuntu
-  ignore_unreachable: true
+  hosts: ubuntu:!localhost  # This tells Ansible "ubuntu group, but definitely not localhost"
+  become: yes
+  
+  # Configuration data is pulled automatically from group_vars/all.yml
   vars_files:
     - ansible_passwords.yml
+
   tasks:
-    - include_tasks: third-party-software.yml
-      tags: [software]
+    # --- SECURITY LAYER ---
+    - name: Apply SSH Hardening and Banners
+      include_tasks: ssh_harden.yml
 
-    - include_tasks: sshfs.yml
-      tags: [sshfs, mounts]
+    # --- APPLICATION LAYER ---
+    - name: Install Third Party Software
+      include_tasks: third-party-software.yml
 
-    - include_tasks: update.yml
-      tags: [update, maintenance]
+    # --- CONFIGURATION LAYER ---
+    - name: Install Python Environment
+      include_tasks: python.yml
 
-    - include_tasks: aptcleanup.yml
-      tags: [cleanup, maintenance]
+    - name: Manage Flatpak Packages
+      include_tasks: flatpaks.yml
 
-    # Added the python tag here so --tags python works for your desktop
-    - include_tasks: python.yml
-      tags: [python, maintenance, jellylink]
+    # --- SYSTEM MAINTENANCE ---
+    - name: Run System Updates
+      include_tasks: update.yml
 
-    - include_tasks: flatpaks.yml
-      tags: [flatpak]
+    - name: Perform APT Cleanup
+      include_tasks: aptcleanup.yml
 
     - name: Check if a reboot is needed
       stat:
         path: /var/run/reboot-required
       register: reboot_required_file
-      tags: [always] # 'always' ensures this runs even with specific tags
 
     - name: Reboot the server if required
       reboot:
       when: reboot_required_file.stat.exists
-      tags: [reboot]
 
-# --- TOP LEVEL IMPORTS (Outside the Ubuntu play) ---
+  handlers:
+    # Global handler to restart SSH when config changes
+    - name: restart sshd
+      service:
+        name: ssh
+        state: restarted
 
+###########################################################
+# TOP LEVEL ORCHESTRATION
+###########################################################
+
+# Runs tasks on Raspberry Pi group
 - import_playbook: pi.yml
-  tags: [pi, python] # Added python tag so Pi maintenance runs too
 
+# Runs tasks on AWS group (Now enabled via Tailscale)
 - import_playbook: aws.yml
-  tags: [aws]
 
-- import_playbook: wireguard-management.yml
-  tags: [wireguard, vpn]
+# Configure SSHFS mounts (separate playbook)
+- import_playbook: sshfs.yml
