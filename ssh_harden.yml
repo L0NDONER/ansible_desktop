@@ -1,0 +1,24 @@
+---
+- name: Create the aggressive banner file
+  copy:
+    dest: /etc/ssh/banner.txt
+    content: |
+      #################################################################################
+      #                                                                               #
+      #             IF YOU ARE NOT MARTIN OR UBUNTU, KINDLY FUCK OFF.                 #
+      #                                                                               #
+      #################################################################################
+    mode: '0644'
+
+- name: Harden SSH (Identity and Banner)
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    validate: 'sshd -t -f %s'
+  loop:
+    - { regexp: '^#?Banner',                 line: 'Banner /etc/ssh/banner.txt' }
+    - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
+    - { regexp: '^#?PermitRootLogin',        line: 'PermitRootLogin no' }
+    - { regexp: '^#?AllowUsers',             line: 'AllowUsers martin ubuntu' }
+  notify: restart sshd
