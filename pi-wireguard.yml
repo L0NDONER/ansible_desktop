@@ -1,0 +1,235 @@
+---
+###########################################################
+#    Raspberry Pi Home VPN with WireGuard (wg-easy)     #
+#    Access your home network from anywhere!             #
+###########################################################
+
+- name: Deploy WireGuard VPN on Raspberry Pi
+  hosts: pi
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    # Your home network configuration
+    home_network: "10.0.0.0/24"
+    pi_local_ip: "10.0.0.122"
+    
+    # WireGuard configuration
+    wireguard_password_hash: "{{ vault_wireguard_password_hash }}"
+    wireguard_vpn_port: "51820"
+    wireguard_web_port: "51821"
+    
+    # VPN subnet (different from home network!)
+    vpn_subnet: "10.8.0.0/24"
+    
+    # Pi-hole DNS (so VPN clients get ad-blocking)
+    pihole_ip: "10.0.0.122"
+  
+  pre_tasks:
+    - name: Wait for Pi to be reachable
+      wait_for_connection:
+        timeout: 30
+      register: pi_connection
+      ignore_errors: yes
+    
+    - name: End play if Pi unreachable
+      meta: end_host
+      when: pi_connection is failed
+  
+  tasks:
+    # ==========================================
+    # System Setup
+    # ==========================================
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      tags: [system]
+    
+    - name: Install required packages
+      apt:
+        name:
+          - docker.io
+          - docker-compose
+        state: present
+      tags: [system, docker]
+    
+    - name: Ensure Docker service is running
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+      tags: [docker]
+    
+    - name: Add pi user to docker group
+      user:
+        name: martin
+        groups: docker
+        append: yes
+      tags: [docker]
+    
+    # ==========================================
+    # Kernel Parameters for WireGuard
+    # ==========================================
+    - name: Enable IP forwarding
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        state: present
+        reload: yes
+      tags: [wireguard, system]
+    
+    - name: Configure kernel parameters for WireGuard
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+      loop:
+        - { name: 'net.ipv4.conf.all.src_valid_mark', value: '1' }
+        - { name: 'net.ipv4.ip_forward', value: '1' }
+      tags: [wireguard, system]
+    
+    # ==========================================
+    # WireGuard (wg-easy) Deployment
+    # ==========================================
+    - name: Create WireGuard config directory
+      file:
+        path: /etc/wireguard
+        state: directory
+        mode: '0755'
+      tags: [wireguard]
+    
+    - name: Stop existing wg-easy container (if any)
+      community.docker.docker_container:
+        name: wg-easy
+        state: absent
+      tags: [wireguard]
+      ignore_errors: yes
+    
+    - name: Deploy WireGuard (wg-easy) container
+      community.docker.docker_container:
+        name: wg-easy
+        image: ghcr.io/wg-easy/wg-easy:latest
+        state: started
+        restart_policy: unless-stopped
+        capabilities:
+          - NET_ADMIN
+          - SYS_MODULE
+        sysctls:
+          net.ipv4.conf.all.src_valid_mark: "1"
+          net.ipv4.ip_forward: "1"
+        volumes:
+          - /etc/wireguard:/etc/wireguard
+        ports:
+          - "{{ wireguard_web_port }}:51821/tcp"
+          - "{{ wireguard_vpn_port }}:51820/udp"
+        env:
+          WG_HOST: "{{ ansible_default_ipv4.address }}"  # Pi's public IP
+          PASSWORD_HASH: "{{ wireguard_password_hash }}"
+          WG_DEFAULT_DNS: "{{ pihole_ip }}"  # Use Pi-hole for DNS!
+          WG_DEFAULT_ADDRESS: "10.8.0.x"
+          WG_ALLOWED_IPS: "0.0.0.0/0, ::/0"  # Route all traffic through VPN
+          WG_PORT: "{{ wireguard_vpn_port }}"
+      tags: [docker, wireguard]
+    
+    # ==========================================
+    # Firewall Configuration (if using UFW)
+    # ==========================================
+    - name: Check if UFW is installed
+      command: which ufw
+      register: ufw_installed
+      failed_when: false
+      changed_when: false
+      tags: [firewall]
+    
+    - name: Allow WireGuard VPN through firewall
+      ufw:
+        rule: allow
+        port: "{{ wireguard_vpn_port }}"
+        proto: udp
+      when: ufw_installed.rc == 0
+      tags: [firewall]
+    
+    - name: Allow WireGuard WebUI through firewall (local only)
+      ufw:
+        rule: allow
+        port: "{{ wireguard_web_port }}"
+        proto: tcp
+        from_ip: "{{ home_network }}"
+      when: ufw_installed.rc == 0
+      tags: [firewall]
+    
+    # ==========================================
+    # Port Forwarding Instructions
+    # ==========================================
+    - name: Display port forwarding instructions
+      debug:
+        msg:
+          - "============================================"
+          - "⚠️  IMPORTANT: Configure your router!"
+          - "============================================"
+          - "You need to forward port {{ wireguard_vpn_port }}/UDP"
+          - "From: Internet (WAN)"
+          - "To: {{ pi_local_ip }}:{{ wireguard_vpn_port }}"
+          - ""
+          - "Steps:"
+          - "1. Log into your router admin panel"
+          - "2. Find 'Port Forwarding' or 'Virtual Server'"
+          - "3. Add rule:"
+          - "   - External Port: {{ wireguard_vpn_port }}"
+          - "   - Internal IP: {{ pi_local_ip }}"
+          - "   - Internal Port: {{ wireguard_vpn_port }}"
+          - "   - Protocol: UDP"
+          - "============================================"
+      tags: [always]
+    
+    # ==========================================
+    # Health Checks
+    # ==========================================
+    - name: Wait for WireGuard container to be ready
+      wait_for:
+        port: "{{ wireguard_web_port }}"
+        delay: 5
+        timeout: 30
+      tags: [health]
+    
+    - name: Check WireGuard container status
+      command: docker ps --filter name=wg-easy
+      register: wg_status
+      changed_when: false
+      tags: [health]
+    
+    - name: Display WireGuard status
+      debug:
+        msg: "✅ WireGuard container running"
+      when: "'wg-easy' in wg_status.stdout and 'Up' in wg_status.stdout"
+      tags: [health]
+    
+    - name: Get public IP for WireGuard endpoint
+      uri:
+        url: https://api.ipify.org
+        return_content: yes
+      register: public_ip
+      tags: [health]
+    
+    - name: Display setup summary
+      debug:
+        msg:
+          - "============================================"
+          - "🎉 WireGuard Home VPN Deployed!"
+          - "============================================"
+          - "WebUI: http://{{ pi_local_ip }}:{{ wireguard_web_port }}"
+          - "VPN Endpoint: {{ public_ip.content }}:{{ wireguard_vpn_port }}"
+          - ""
+          - "Features:"
+          - "✅ Access entire home network ({{ home_network }})"
+          - "✅ Ad-blocking via Pi-hole DNS"
+          - "✅ Access qBittorrent remotely"
+          - ""
+          - "Next Steps:"
+          - "1. Configure router port forwarding (see above)"
+          - "2. Visit WebUI to create phone config"
+          - "3. Scan QR code with WireGuard app"
+          - "============================================"
+      tags: [always]

@@ -4,3 +4,4 @@ inventory
 .vault_pass
 *.old
 ansible_passwords.yml
+*.save

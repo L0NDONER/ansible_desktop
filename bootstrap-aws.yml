@@ -1,0 +1,23 @@
+---
+- name: Harden AWS EC2 via Tailscale
+  hosts: aws
+  become: yes
+  tasks:
+    - name: Harden SSH (Identity only)
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        validate: 'sshd -t -f %s'
+      loop:
+        - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
+        - { regexp: '^#?PermitRootLogin',        line: 'PermitRootLogin no' }
+        - { regexp: '^#?AllowUsers',             line: 'AllowUsers martin ubuntu' }
+        - { regexp: '^#?Port',                   line: 'Port 22' }
+      notify: restart sshd
+
+  handlers:
+    - name: restart sshd
+      service:
+        name: ssh
+        state: restarted
