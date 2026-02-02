@@ -11,8 +11,10 @@
   vars:
     # Configuration
     domain_name: "flaz.duckdns.org"
-    duckdns_token: "{{ vault_duckdns_token }}"
     admin_email: "oflaherty@gmail.com"
+    
+    # SECURITY: These values are now pulled from your vaulted group_vars/all.yml
+    duckdns_token: "{{ vault_duckdns_token }}"
     wireguard_password_hash: "{{ vault_wireguard_password_hash }}"
     
     # Firewall rules

@@ -1,54 +1,13 @@
 ---
-# Install Google Chrome
-- name: Add Google Chrome GPG key (modern method)
-  ansible.builtin.get_url:
-    url: https://dl.google.com/linux/linux_signing_key.pub
-    dest: /usr/share/keyrings/google-chrome-keyring.asc
-    mode: '0644'
+###########################################################
+#        Martin O'Flaherty: Third Party Software          #
+###########################################################
+# Version History:
+# 0.07 - Fixed 'ubuntu_codename' undefined error by 
+#        moving fact-gathering to the top.
+###########################################################
 
-- name: Add Google Chrome repository
-  apt_repository:
-    repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.asc] http://dl.google.com/linux/chrome/deb/ stable main"
-    state: present
-    filename: google-chrome
-
-- name: Install Google Chrome
-  package:
-    name: google-chrome-stable
-    state: present
-
-# --- DOCKER SECTION: THE FIX ---
-# This removes the blockers for WireGuard-safe container management
-- name: Purge conflicting Ubuntu-native container packages
-  apt:
-    name:
-      - docker.io
-      - docker-doc
-      - docker-compose
-      - docker-compose-v2
-      - podman-docker
-      - containerd
-      - runc
-    state: absent
-    purge: yes
-    autoremove: yes
-
-- name: Remove any remaining Docker-related packages
-  shell: dpkg -l | grep -i docker | awk '{print $2}' | xargs -r apt-get purge -y
-  ignore_errors: yes
-  changed_when: false
-
-- name: Clean up apt cache after removals
-  apt:
-    autoclean: yes
-    autoremove: yes
-
-- name: Add Docker GPG key (modern method)
-  ansible.builtin.get_url:
-    url: https://download.docker.com/linux/ubuntu/gpg
-    dest: /usr/share/keyrings/docker-keyring.asc
-    mode: '0644'
-
+# --- CODENAME DISCOVERY (Run this first!) ---
 - name: Get Ubuntu base codename for Linux Mint
   shell: "grep CODENAME /etc/upstream-release/lsb-release | cut -d= -f2"
   register: mint_ubuntu_base
@@ -65,77 +24,52 @@
     ubuntu_codename: "{{ ansible_distribution_release }}"
   when: ansible_distribution == "Ubuntu"
 
+# --- GOOGLE CHROME (x86_64 Only) ---
+- name: Add Google Chrome GPG key
+  ansible.builtin.get_url:
+    url: https://dl.google.com/linux/linux_signing_key.pub
+    dest: /usr/share/keyrings/google-chrome-keyring.asc
+    mode: '0644'
+  when: ansible_architecture == "x86_64"
+
+- name: Add Google Chrome repository
+  apt_repository:
+    repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.asc] http://dl.google.com/linux/chrome/deb/ stable main"
+    state: present
+    filename: google-chrome
+  when: ansible_architecture == "x86_64"
+
+- name: Install Google Chrome
+  package:
+    name: google-chrome-stable
+    state: present
+  when: ansible_architecture == "x86_64"
+
+# --- DOCKER SECTION (x86_64 Only) ---
+- name: Purge conflicting Ubuntu-native container packages
+  apt:
+    name: [docker.io, docker-doc, docker-compose, containerd, runc]
+    state: absent
+    purge: yes
+  when: ansible_architecture == "x86_64"
+
+- name: Add Docker GPG key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /usr/share/keyrings/docker-keyring.asc
+    mode: '0644'
+  when: ansible_architecture == "x86_64"
+
 - name: Add Docker repository
   apt_repository:
     repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-keyring.asc] https://download.docker.com/linux/ubuntu {{ ubuntu_codename }} stable"
     state: present
     filename: docker
+  when: ansible_architecture == "x86_64" and ubuntu_codename is defined
 
 - name: Install Official Docker Engine
   apt:
-    name:
-      - docker-ce
-      - docker-ce-cli
-      - containerd.io
-      - docker-compose-plugin
+    name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
     state: present
     update_cache: yes
-
-- name: Ensure Docker service is running
-  systemd:
-    name: docker
-    state: started
-    enabled: yes
-
-- name: Add user to docker group
-  user:
-    name: "{{ ansible_user_id }}"
-    groups: docker
-    append: yes
-# --- END DOCKER SECTION ---
-
-# Install Sublime Text
-- name: Add Sublime Text GPG key (modern method)
-  ansible.builtin.get_url:
-    url: https://download.sublimetext.com/sublimehq-pub.gpg
-    dest: /usr/share/keyrings/sublimehq-keyring.asc
-    mode: '0644'
-
-- name: Add Sublime Text repository
-  apt_repository:
-    repo: "deb [signed-by=/usr/share/keyrings/sublimehq-keyring.asc] https://download.sublimetext.com/ apt/stable/"
-    state: present
-    filename: sublime-text
-
-- name: Install Sublime Text
-  package:
-    name: sublime-text
-    state: present
-
-# Install Jellyfin
-- name: Create Jellyfin keyring directory
-  file:
-    path: /usr/share/keyrings
-    state: directory
-    mode: '0755'
-
-- name: Download Jellyfin GPG key
-  ansible.builtin.get_url:
-    url: https://repo.jellyfin.org/jellyfin_team.gpg.key
-    dest: /usr/share/keyrings/jellyfin-keyring.asc
-    mode: '0644'
-
-- name: Add Jellyfin repository
-  apt_repository:
-    repo: "deb [signed-by=/usr/share/keyrings/jellyfin-keyring.asc] https://repo.jellyfin.org/ubuntu {{ ubuntu_codename }} main"
-    state: present
-    filename: jellyfin
-
-- name: Install Jellyfin
-  package:
-    name:
-      - jellyfin
-      - jellyfin-server
-      - jellyfin-web
-    state: present
-    update_cache: yes
+  when: ansible_architecture == "x86_64"

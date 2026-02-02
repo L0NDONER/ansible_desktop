@@ -1,0 +1,108 @@
+---
+- name: Setup GitOps Ansible-Pull with WhatsApp Notifications
+  hosts: all
+  become: yes
+  
+  vars_files:
+    - group_vars/all.yml
+  
+  vars:
+    target_user: "{{ ansible_user | default(ansible_env.USER) }}"
+    base_dir: "/home/{{ target_user }}/.ansible"
+    pull_dir: "{{ base_dir }}/pull"
+    ansible_vault_password_file: "{{ base_dir }}/vault_pass.txt"
+    gitops_repo: "https://github.com/L0NDONER/ansible-gitops.git"
+
+    # REDACTED: Plaintext Twilio credentials removed.
+    # Logic now pulls from group_vars/all.yml via local.yml integration.
+
+  tasks:
+    - name: Ensure .ansible directory exists
+      file:
+        path: "{{ base_dir }}"
+        state: directory
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: '0700'
+
+    - name: Ensure ansible-pull directory exists
+      file:
+        path: "{{ pull_dir }}"
+        state: directory
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: '0700'
+
+    - name: Ensure vault password file exists
+      copy:
+        dest: "{{ ansible_vault_password_file }}"
+        content: "{{ ansible_vault_password }}"
+        owner: "{{ target_user }}"
+        group: "{{ target_user }}"
+        mode: '0600'
+      no_log: true
+
+    - name: Create Ansible-Pull Service
+      copy:
+        dest: /etc/systemd/system/ansible-pull.service
+        content: |
+          [Unit]
+          Description=GitOps Managed Ansible Pull
+          After=network-online.target
+          Wants=network-online.target
+          
+          [Service]
+          Type=oneshot
+          User={{ target_user }}
+          Group={{ target_user }}
+          WorkingDirectory=/home/{{ target_user }}
+          Environment="HOME=/home/{{ target_user }}"
+          ExecStart=/usr/bin/ansible-pull \
+            -U {{ gitops_repo }} \
+            -C main \
+            -d {{ pull_dir }} \
+            --vault-password-file {{ ansible_vault_password_file }} \
+            -v \
+            local.yml
+          StandardOutput=journal
+          StandardError=journal
+          SyslogIdentifier=ansible-pull
+          
+          [Install]
+          WantedBy=multi-user.target
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Reload systemd
+
+    - name: Create Ansible-Pull Timer
+      copy:
+        dest: /etc/systemd/system/ansible-pull.timer
+        content: |
+          [Unit]
+          Description=Run Ansible Pull nightly at 1am
+          
+          [Timer]
+          OnCalendar=*-*-* 01:00:00
+          Persistent=true
+          RandomizedDelaySec=300
+          Unit=ansible-pull.service
+          
+          [Install]
+          WantedBy=timers.target
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Reload systemd
+
+    - name: Enable and Start Ansible-Pull Timer
+      systemd:
+        name: ansible-pull.timer
+        enabled: yes
+        state: started
+        daemon_reload: yes
+
+  handlers:
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
