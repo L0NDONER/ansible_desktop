@@ -51,6 +51,7 @@
         - pi_reachable is success
         - is_mounted.rc != 0
       register: mount_result
+      ignore_errors: yes
 
     - name: Create convenient unmount alias
       lineinfile:
