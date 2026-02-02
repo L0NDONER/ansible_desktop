@@ -1,5 +1,5 @@
 ---
-- name: Setup GitOps Ansible-Pull with WhatsApp Notifications
+- name: Setup GitOps Ansible-Pull with WhatsApp Notifications & Dashboard
   hosts: all
   become: yes
   
@@ -11,12 +11,10 @@
     base_dir: "/home/{{ target_user }}/.ansible"
     pull_dir: "{{ base_dir }}/pull"
     ansible_vault_password_file: "{{ base_dir }}/vault_pass.txt"
-    gitops_repo: "https://github.com/L0NDONER/ansible-gitops.git"
-
-    # REDACTED: Plaintext Twilio credentials removed.
-    # Logic now pulls from group_vars/all.yml via local.yml integration.
+    gitops_repo: "https://github.com/L0NDONER/ansible_desktop.git"
 
   tasks:
+    # --- DIRECTORY SETUP ---
     - name: Ensure .ansible directory exists
       file:
         path: "{{ base_dir }}"
@@ -42,6 +40,7 @@
         mode: '0600'
       no_log: true
 
+    # --- ANSIBLE PULL INFRASTRUCTURE ---
     - name: Create Ansible-Pull Service
       copy:
         dest: /etc/systemd/system/ansible-pull.service
@@ -67,15 +66,12 @@
           StandardOutput=journal
           StandardError=journal
           SyslogIdentifier=ansible-pull
-          
-          [Install]
-          WantedBy=multi-user.target
         owner: root
         group: root
         mode: '0644'
       notify: Reload systemd
 
-    - name: Create Ansible-Pull Timer
+    - name: Create Ansible-Pull Timer (1AM Pull)
       copy:
         dest: /etc/systemd/system/ansible-pull.timer
         content: |
@@ -95,12 +91,59 @@
         mode: '0644'
       notify: Reload systemd
 
-    - name: Enable and Start Ansible-Pull Timer
+    # --- COMMANDER BOT SERVICE (Project 2) ---
+    - name: Create Commander Bot Service
+      copy:
+        dest: /etc/systemd/system/commander.service
+        content: |
+          [Unit]
+          Description=WhatsApp Commander Bot
+          After=network-online.target
+          
+          [Service]
+          Type=simple
+          User={{ target_user }}
+          WorkingDirectory={{ pull_dir }}
+          ExecStart=/usr/bin/python3 {{ pull_dir }}/commander.py
+          Restart=always
+          StandardOutput=journal
+          
+          [Install]
+          WantedBy=multi-user.target
+      notify: Reload systemd
+
+    # --- SEEDING DASHBOARD SERVICE (Streamlit) ---
+    - name: Create Seeding Dashboard Service
+      copy:
+        dest: /etc/systemd/system/seeding-dashboard.service
+        content: |
+          [Unit]
+          Description=Minty Seeding Streamlit Dashboard
+          After=network-online.target
+
+          [Service]
+          Type=simple
+          User={{ target_user }}
+          WorkingDirectory={{ pull_dir }}
+          ExecStart=/usr/local/bin/streamlit run {{ pull_dir }}/dashboard.py --server.port 8501
+          Restart=always
+          StandardOutput=journal
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Reload systemd
+
+    # --- ACTIVATE SERVICES ---
+    - name: Enable and Start All Timers and Services
       systemd:
-        name: ansible-pull.timer
+        name: "{{ item }}"
         enabled: yes
         state: started
         daemon_reload: yes
+      loop:
+        - ansible-pull.timer
+        - commander.service
+        - seeding-dashboard.service
 
   handlers:
     - name: Reload systemd
