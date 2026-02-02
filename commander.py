@@ -1,12 +1,3 @@
-from flask import Flask, request
-from twilio.twiml.messaging_response import MessagingResponse
-import subprocess
-
-app = Flask(__name__)
-
-# SECURITY: Replace with your actual WhatsApp-enabled mobile number
-AUTHORIZED_NUMBER = "whatsapp:+447375272694" 
-
 @app.route("/webhook", methods=['POST'])
 def whatsapp_bot():
     incoming_msg = request.values.get('Body', '').lower()
@@ -18,16 +9,32 @@ def whatsapp_bot():
         msg.body("Unauthorized access attempt.")
         return str(resp)
 
-    # COMMAND: Trigger the 1AM Pull manually
+    # Manual Update Trigger
     if 'update' in incoming_msg:
         try:
-            # Starts the systemd service defined in your gitops-setup.yml
             subprocess.Popen(["sudo", "systemctl", "start", "ansible-pull.service"])
             msg.body("🚀 Update triggered manually! Expect a 'Smooth as butter' message soon.")
         except Exception as e:
             msg.body(f"❌ Error: {str(e)}")
 
-    return str(resp)
+    # Seeding Status Summary
+    elif 'seeding' in incoming_msg or 'status' in incoming_msg:
+        try:
+            from dashboard import get_seeding_status, DOWNLOADS_PATH
+            data, _ = get_seeding_status(DOWNLOADS_PATH)
+            safe_count = sum(1 for f in data if f["IsSafe"])
+            
+            response = f"🌱 *Minty Seeding Status*\n"
+            response += f"📦 Total Files: {len(data)}\n"
+            response += f"✅ Ready for Cleanup: {safe_count}\n"
+            
+            if safe_count > 0:
+                response += "\n*Safe to remove:* " + ", ".join([f["File"] for f in data if f["IsSafe"]][:3])
+            msg.body(response)
+        except Exception as e:
+            msg.body(f"⚠️ Dashboard error: {str(e)}")
 
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    else:
+        msg.body("Hi Martin! Commands: 'update', 'seeding', or 'status'.")
+
+    return str(resp)
