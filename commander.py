@@ -43,8 +43,11 @@ min-size=500MB
         with open(AUTODL_CONFIG, 'a') as f:
             f.write(filter_config)
         
-        # Reload autodl-irssi
-        subprocess.run(['pkill', '-SIGHUP', 'irssi'], check=False)
+        # Reload autodl-irssi by sending command to screen session
+        subprocess.run(
+            ['screen', '-S', 'irssi', '-X', 'stuff', '/autodl update\n'],
+            check=False
+        )
         
         return f"✅ Added TV show: {show_name}"
     except Exception as e:
@@ -75,8 +78,11 @@ max-size=30GB
         with open(AUTODL_CONFIG, 'a') as f:
             f.write(filter_config)
         
-        # Reload autodl-irssi
-        subprocess.run(['pkill', '-SIGHUP', 'irssi'], check=False)
+        # Reload autodl-irssi by sending command to screen session
+        subprocess.run(
+            ['screen', '-S', 'irssi', '-X', 'stuff', '/autodl update\n'],
+            check=False
+        )
         
         return f"✅ Added movie: {movie_name}"
     except Exception as e:

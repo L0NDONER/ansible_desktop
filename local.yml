@@ -3,12 +3,16 @@
 #        Martin O'Flaherty: Ansible Master Playbook       #
 ###########################################################
 # Version History:
+# 0.10 - Consolidated Success Notification for entire fleet
 # 0.11 - Added Block/Rescue for intelligent notifications
 # 0.12 - Renamed Twilio variables to bypass secret scanner
+# 0.13 - Enhanced Error Reporting to prevent "False Down" alerts
+# 0.14 - Fixed Fleet Reporting Variable
+# 0.15 - Optimized host targeting for stack visibility
 ###########################################################
 
 - name: Execute playbook tasks on orchestrated hosts
-  hosts: localhost
+  hosts: all  # Target all hosts to capture the full fleet context
   become: yes
   
   vars_files:
@@ -43,37 +47,43 @@
 
         - name: Reboot if required
           reboot:
+            msg: "Rebooting for system updates"
+            reboot_timeout: 3600
           when: reboot_required_file.stat.exists
 
-        # --- SUCCESS NOTIFICATION ---
-        - name: Send Success WhatsApp
-          community.general.twilio:
-            account_sid: "{{ twilio_sid }}"
-            auth_token: "{{ tw_auth_k }}"  # Renamed to bypass scanner
-            from_number: "whatsapp:{{ twilio_from_number }}"
-            to_number: "whatsapp:{{ my_mobile_number }}"
-            msg: |
-              🎬 *Ansible Fleet Update*
-              🖥️ *Host:* {{ inventory_hostname }}
-              ✅ *Status:* Smooth as butter.
-              📋 *Version:* 0.12 is now live.
-          delegate_to: localhost
-          run_once: true
-
       rescue:
-        # --- FAILURE NOTIFICATION ---
+        # --- ENHANCED FAILURE NOTIFICATION ---
+        # This triggers per-host so you know exactly which server failed and why
         - name: Send Failure WhatsApp
           community.general.twilio:
             account_sid: "{{ twilio_sid }}"
-            auth_token: "{{ tw_auth_k }}"  # Renamed to bypass scanner
+            auth_token: "{{ tw_auth_k }}"
             from_number: "whatsapp:{{ twilio_from_number }}"
             to_number: "whatsapp:{{ my_mobile_number }}"
             msg: |
               🚨 *Ansible Fleet ALERT*
               🖥️ *Host:* {{ inventory_hostname }}
-              ❌ *Status:* FAILED. 
-              ⚠️ Manual intervention required.
+              ❌ *Status:* FAILED
+              🛠️ *Failed Task:* {{ ansible_failed_task.name }}
+              📖 *Error Detail:* {{ ansible_failed_result.msg | default('No message available') | truncate(100) }}
+              ⚠️ Server is likely UP but maintenance failed.
           delegate_to: localhost
+
+    # --- SINGLE FLEET SUCCESS REPORT ---
+    # This runs once at the very end of the play after all hosts are processed
+    - name: Send Consolidated Success WhatsApp
+      community.general.twilio:
+        account_sid: "{{ twilio_sid }}"
+        auth_token: "{{ tw_auth_k }}"
+        from_number: "whatsapp:{{ twilio_from_number }}"
+        to_number: "whatsapp:{{ my_mobile_number }}"
+        msg: |
+          🎬 *Ansible Fleet Update Complete*
+          ✅ *Status:* Smooth as butter.
+          🖥️ *Updated Stack:* {{ ansible_play_hosts_all | join(', ') }}
+          📋 *Version:* 0.15 is now live.
+      delegate_to: localhost
+      run_once: true
 
   handlers:
     - name: restart sshd
