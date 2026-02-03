@@ -1,0 +1,11 @@
+[Unit]
+Description=Ansible VPN Watchdog Timer
+Requires=ansible-watchdog.service
+
+[Timer]
+OnCalendar=*-*-* 01:00:00
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

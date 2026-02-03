@@ -1,0 +1,15 @@
+[Unit]
+Description=Ansible VPN Watchdog - Self-Healing Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=martin
+WorkingDirectory=/home/martin/ansible
+ExecStart=/usr/bin/ansible-playbook /home/martin/ansible/watchdog.yml
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

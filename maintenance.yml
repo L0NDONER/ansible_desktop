@@ -1,6 +1,6 @@
 ---
 ###########################################################
-#        Martin O'Flaherty: Ansible Master Playbook       #
+#        Martin O'Flaherty: Fleet Maintenance             #
 ###########################################################
 # Version History:
 # 0.10 - Consolidated Success Notification for entire fleet
@@ -9,10 +9,11 @@
 # 0.13 - Enhanced Error Reporting to prevent "False Down" alerts
 # 0.14 - Fixed Fleet Reporting Variable
 # 0.15 - Optimized host targeting for stack visibility
+# 0.16 - Refactored into maintenance.yml, orchestrated by mastersite.yml
 ###########################################################
 
-- name: Execute playbook tasks on orchestrated hosts
-  hosts: all  # Target all hosts to capture the full fleet context
+- name: System Maintenance and Updates
+  hosts: all
   become: yes
   
   vars_files:
@@ -81,7 +82,7 @@
           🎬 *Ansible Fleet Update Complete*
           ✅ *Status:* Smooth as butter.
           🖥️ *Updated Stack:* {{ ansible_play_hosts_all | join(', ') }}
-          📋 *Version:* 0.15 is now live.
+          📋 *Version:* 0.16 maintenance module
       delegate_to: localhost
       run_once: true
 
@@ -91,10 +92,3 @@
         name: ssh
         state: restarted
 
-###########################################################
-# TOP LEVEL ORCHESTRATION
-###########################################################
-
-- import_playbook: pi.yml
-- import_playbook: aws.yml
-- import_playbook: sshfs.yml

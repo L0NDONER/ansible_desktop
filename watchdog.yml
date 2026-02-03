@@ -1,0 +1,121 @@
+---
+###########################################################
+#        Martin O'Flaherty: VPN Self-Healing Watchdog     #
+###########################################################
+# Monitors VPN health and SSL certificate status
+# Auto-heals VPN on service failure
+# Alerts on SSL expiry warnings
+# Runs via systemd timer at 1am nightly
+###########################################################
+
+- name: VPN Health & SSL Watchdog
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+  
+  vars_files:
+    - group_vars/all.yml
+  
+  vars:
+    target_url: "flaz.duckdns.org"
+    full_url: "https://{{ target_url }}"
+    ansible_base: "{{ ansible_env.HOME }}/ansible"
+    main_playbook: "aws.yml"
+    heal_cooldown_minutes: 10
+    ssl_warning_days: 30
+
+  tasks:
+    # --- TASK 1: SERVICE HEALTH CHECK ---
+    - name: Check if VPN Web UI is responsive
+      uri:
+        url: "{{ full_url }}"
+        status_code: 200
+        timeout: 10
+      register: health_check
+      ignore_errors: yes
+
+    # --- TASK 2: SSL EXPIRY CHECK (Monitoring Only) ---
+    - name: Get SSL certificate information
+      community.crypto.get_certificate:
+        host: "{{ target_url }}"
+        port: 443
+      register: cert_info
+      ignore_errors: yes
+
+    - name: Calculate days until SSL expiry
+      set_fact:
+        days_remaining: "{{ ((cert_info.not_after | to_datetime('%Y%m%d%H%M%SZ')) - (ansible_date_time.iso8601 | to_datetime('%Y-%m-%dT%H:%M:%SZ'))).days }}"
+      when: cert_info.not_after is defined
+
+    - name: Report Current Status
+      debug:
+        msg: 
+          - "🌐 Service Status: {{ health_check.status | default('Down/Timeout') }}"
+          - "🔒 SSL Days Remaining: {{ days_remaining | default('Unknown') }}"
+          - "{% if days_remaining is defined and days_remaining | int < ssl_warning_days %}⚠️  SSL expires in {{ days_remaining }} days - certbot will auto-renew{% endif %}"
+
+    # --- TASK 3: VPN SELF-HEALING LOGIC ---
+    # --- TASK 3: VPN SELF-HEALING LOGIC ---
+    - name: Check last healing timestamp (Anti-Flap)
+      stat:
+        path: /tmp/vpn_last_heal
+      register: last_heal
+
+    - name: Determine if VPN healing is required
+      set_fact:
+        needs_healing: "{{ health_check.status in [502, 504] or health_check.failed }}"
+        cooldown_active: >-
+          {{
+            last_heal.stat.exists and 
+            ((ansible_date_time.epoch | int) - (last_heal.stat.mtime | int) < (heal_cooldown_minutes * 60))
+          }}
+
+    - name: Trigger VPN Recovery
+      shell: |
+        cd {{ ansible_base }}
+        ansible-playbook {{ main_playbook }} --tags wireguard -i inventory.ini --vault-password-file ~/.vault_pass
+      when: 
+        - needs_healing
+        - not cooldown_active
+      register: healing_result
+      ignore_errors: yes
+
+    - name: Record healing timestamp
+      file:
+        path: /tmp/vpn_last_heal
+        state: touch
+        modification_time: preserve
+      when: healing_result is changed
+
+    # --- TASK 4: NOTIFICATIONS ---
+    - name: Send WhatsApp Alert on VPN Auto-Healing
+      community.general.twilio:
+        account_sid: "{{ twilio_sid }}"
+        auth_token: "{{ tw_auth_k }}"
+        from_number: "whatsapp:{{ twilio_from_number }}"
+        to_number: "whatsapp:{{ my_mobile_number }}"
+        msg: |
+          🔧 *VPN Watchdog Auto-Heal*
+          🌐 *URL:* {{ full_url }}
+          📉 *Health:* {{ health_check.status | default('FAIL') }}
+          ⚕️ *Action:* Triggered aws.yml --tags wireguard
+          ✅ Service restoration attempted
+          🕐 Cooldown: {{ heal_cooldown_minutes }} min
+      when: healing_result is changed
+
+    - name: Send WhatsApp Alert on SSL Expiry Warning
+      community.general.twilio:
+        account_sid: "{{ twilio_sid }}"
+        auth_token: "{{ tw_auth_k }}"
+        from_number: "whatsapp:{{ twilio_from_number }}"
+        to_number: "whatsapp:{{ my_mobile_number }}"
+        msg: |
+          ⚠️ *SSL Certificate Expiry Warning*
+          🌐 *Domain:* {{ target_url }}
+          ⏳ *Days Remaining:* {{ days_remaining }}
+          ℹ️ Certbot will auto-renew (no action needed)
+          📅 Check: sudo certbot renew --dry-run
+      when: 
+        - days_remaining is defined
+        - days_remaining | int < ssl_warning_days
+        - days_remaining | int > 0

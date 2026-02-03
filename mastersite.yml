@@ -1,0 +1,17 @@
+---
+############################################################
+#            Martin O'Flaherty: Site Master               #
+###########################################################
+
+- name: Execute playbook tasks on orchestrated hosts
+  hosts: all:!aws-vpn  # This targets everything but skips the cloud VPN
+  become: yes
+  
+  vars_files:
+    - group_vars/all.yml
+
+- import_playbook: maintenance.yml # (The tasks currently inside your local.yml)
+- import_playbook: pi.yml
+- import_playbook: aws.yml
+- import_playbook: sshfs.yml
+- import_playbook: watchdog.yml    # The new self-healing check
