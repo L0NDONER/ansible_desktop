@@ -1,8 +1,21 @@
 ---
+###########################################################
+#        Martin O'Flaherty: WireGuard VPN Deployment      #
+###########################################################
+# Version History:
+# 0.1 - Initial WireGuard deployment with wg-easy
+# 0.2 - Added automated backups and health checks
+# 0.3 - Added UFW firewall configuration
+# 0.4 - Added WhatsApp deployment notification
+###########################################################
+
 - name: WireGuard VPN Configuration
   hosts: aws
   become: yes
   gather_facts: yes
+  
+  vars_files:
+    - group_vars/all.yml
   
   vars:
     # WireGuard configuration
@@ -77,6 +90,13 @@
       apt:
         name: ufw
         state: present
+      tags: [firewall]
+    
+    - name: Configure UFW - Allow SSH (safety first!)
+      ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
       tags: [firewall]
     
     - name: Configure UFW - Allow WireGuard Web UI
@@ -174,3 +194,27 @@
           - "Network Mode: host (direct network access)"
           - "================================"
       tags: [health]
+    
+    # ==========================================
+    # Deployment Notification
+    # ==========================================
+    - name: Send WhatsApp notification on successful deployment
+      community.general.twilio:
+        account_sid: "{{ twilio_sid }}"
+        auth_token: "{{ tw_auth_k }}"
+        from_number: "whatsapp:{{ twilio_from_number }}"
+        to_number: "whatsapp:{{ my_mobile_number }}"
+        msg: |
+          🔐 *WireGuard VPN Deployed*
+          🌐 *Web UI:* http://{{ ansible_host }}:{{ wireguard_web_port }}
+          🔌 *VPN Port:* {{ wireguard_vpn_port }}/udp
+          {% if wg_info.rc == 0 and wg_info.stdout_lines | length > 1 %}
+          👥 *Peers:* {{ wg_info.stdout_lines | length - 1 }} connected
+          {% else %}
+          👥 *Peers:* Ready for connections
+          {% endif %}
+          ✅ *Status:* Container healthy
+          📋 *Version:* 0.4
+      delegate_to: localhost
+      tags: [notification]
+      when: "'wg-easy' in wg_status.stdout"

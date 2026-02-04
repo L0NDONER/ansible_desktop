@@ -10,6 +10,7 @@
 # 0.14 - Fixed Fleet Reporting Variable
 # 0.15 - Optimized host targeting for stack visibility
 # 0.16 - Refactored into maintenance.yml, orchestrated by mastersite.yml
+# 0.17 - Added check_mode safeguards to prevent WhatsApp spam during dry runs
 ###########################################################
 
 - name: System Maintenance and Updates
@@ -69,6 +70,7 @@
               📖 *Error Detail:* {{ ansible_failed_result.msg | default('No message available') | truncate(100) }}
               ⚠️ Server is likely UP but maintenance failed.
           delegate_to: localhost
+          when: not ansible_check_mode
 
     # --- SINGLE FLEET SUCCESS REPORT ---
     # This runs once at the very end of the play after all hosts are processed
@@ -82,13 +84,13 @@
           🎬 *Ansible Fleet Update Complete*
           ✅ *Status:* Smooth as butter.
           🖥️ *Updated Stack:* {{ ansible_play_hosts_all | join(', ') }}
-          📋 *Version:* 0.16 maintenance module
+          📋 *Version:* 0.17 maintenance module
       delegate_to: localhost
       run_once: true
+      when: not ansible_check_mode
 
   handlers:
     - name: restart sshd
       service:
         name: ssh
         state: restarted
-

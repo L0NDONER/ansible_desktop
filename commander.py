@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
 """
 WhatsApp Commander Bot - Minty Server Control via Twilio
+
+Version History:
+0.1 - Initial TV/Movie filter management
+0.2 - Added manual update trigger
+0.3 - Added seeding status integration
+0.4 - Added VPN healing and system stats commands
+
+Commands:
+- update: Trigger ansible-pull manually
+- healvpn/fixvpn: Restart VPN infrastructure
+- addtv <name>: Add TV show filter to autodl
+- addmovie <name>: Add movie filter to autodl
+- seeding/status: Check seeding ratios
+- stats/system: System resource usage
 """
 import subprocess
 import os
@@ -110,6 +124,20 @@ def whatsapp_bot():
         except Exception as e:
             msg.body(f"❌ Error: {str(e)}")
 
+    # VPN Restart/Heal
+    elif incoming_lower == 'healvpn' or incoming_lower == 'fixvpn':
+        try:
+            subprocess.Popen([
+                "ansible-playbook", 
+                os.path.expanduser("~/ansible/aws.yml"), 
+                "--tags", "wireguard",
+                "-i", os.path.expanduser("~/ansible/inventory.ini"),
+                "--vault-password-file", os.path.expanduser("~/.vault_pass")
+            ])
+            msg.body("🔧 VPN healing initiated! Check status in 30 seconds.")
+        except Exception as e:
+            msg.body(f"❌ Error: {str(e)}")
+
     # Add TV Show
     elif incoming_lower.startswith('addtv '):
         show_name = incoming_msg[6:].strip()
@@ -145,8 +173,28 @@ def whatsapp_bot():
         except Exception as e:
             msg.body(f"⚠️ Dashboard error: {str(e)}")
 
+    # System Stats
+    elif incoming_lower == 'stats' or incoming_lower == 'system':
+        try:
+            # Get uptime
+            uptime = subprocess.check_output(['uptime', '-p']).decode().strip()
+            # Get disk usage
+            df = subprocess.check_output(['df', '-h', '/']).decode().split('\n')[1].split()
+            disk_used = df[4]
+            # Get memory
+            mem = subprocess.check_output(['free', '-h']).decode().split('\n')[1].split()
+            mem_used = f"{mem[2]}/{mem[1]}"
+            
+            response = f"💻 *Minty System Stats*\n"
+            response += f"⏰ {uptime}\n"
+            response += f"💾 Disk: {disk_used} used\n"
+            response += f"🧠 RAM: {mem_used}\n"
+            msg.body(response)
+        except Exception as e:
+            msg.body(f"❌ Error: {str(e)}")
+
     else:
-        msg.body("Hi Martin! Commands:\n• update\n• addtv <show name>\n• addmovie <movie name>\n• seeding / status")
+        msg.body("Hi Martin! Commands:\n• update\n• healvpn / fixvpn\n• addtv <show name>\n• addmovie <movie name>\n• seeding / status\n• stats / system")
 
     return str(resp)
 

@@ -5,3 +5,8 @@ inventory
 *.old
 ansible_passwords.yml
 *.save
+# Git artifacts
+FETCH_HEAD
+
+# Temp files
+sys

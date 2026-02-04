@@ -1,4 +1,13 @@
 ---
+###########################################################
+#        Martin O'Flaherty: GitOps Bootstrap              #
+###########################################################
+# Version History:
+# 0.1 - Initial GitOps setup with ansible-pull
+# 0.2 - Added Commander Bot and Dashboard services
+# 0.3 - Added deployment success notification
+###########################################################
+
 - name: Setup GitOps Ansible-Pull with WhatsApp Notifications & Dashboard
   hosts: all
   become: yes
@@ -144,6 +153,24 @@
         - ansible-pull.timer
         - commander.service
         - seeding-dashboard.service
+
+    # --- SUCCESS NOTIFICATION ---
+    - name: Send GitOps Setup Confirmation
+      community.general.twilio:
+        account_sid: "{{ twilio_sid }}"
+        auth_token: "{{ tw_auth_k }}"
+        from_number: "whatsapp:{{ twilio_from_number }}"
+        to_number: "whatsapp:{{ my_mobile_number }}"
+        msg: |
+          🤖 *GitOps Bootstrap Complete*
+          🖥️ *Host:* {{ inventory_hostname }}
+          ✅ *Ansible-Pull:* Nightly at 1am
+          💬 *Commander Bot:* Running
+          📊 *Dashboard:* http://{{ ansible_default_ipv4.address }}:8501
+          🔄 *Auto-Updates:* Enabled
+          📋 *Version:* 0.3
+      delegate_to: localhost
+      run_once: false
 
   handlers:
     - name: Reload systemd

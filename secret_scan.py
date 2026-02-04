@@ -1,6 +1,21 @@
 #!/usr/bin/env python3
+"""
+Secret Scanner - Git Pre-Commit Hook
+Prevents accidental commit of unencrypted secrets to version control
+
+Version History:
+0.1 - Initial keyword scanning
+0.2 - Added Jinja2 template detection
+0.3 - Added hash/file path exclusions
+0.4 - Added exit code for git hook integration
+
+Usage:
+  python3 secret_scan.py           # Scan and report
+  echo $?                          # Check exit code (0=clean, 1=secrets found)
+"""
 import os
 import re
+import sys
 
 # Sensitive patterns to look for
 SENSITIVE_KEYWORDS = ['password', 'token', 'secret', 'api_key', 'sid', 'auth', 'become_pass']
@@ -10,8 +25,11 @@ def scan_dry_run():
     print(f"🕵️  SCANNING: Checking {base_path} for unencrypted secrets...")
     
     found_count = 0
+    flagged_files = set()
+    
     for root, dirs, files in os.walk(base_path):
-        if '.git' in root or '__pycache__' in root: continue
+        if '.git' in root or '__pycache__' in root: 
+            continue
         
         for file in files:
             file_path = os.path.join(root, file)
@@ -21,7 +39,8 @@ def scan_dry_run():
                     
                     # 1. Skip files already encrypted with Ansible Vault
                     content = ''.join(lines)
-                    if "$ANSIBLE_VAULT;" in content: continue
+                    if "$ANSIBLE_VAULT;" in content: 
+                        continue
                     
                     for line_num, line in enumerate(lines, 1):
                         # Skip comments
@@ -67,10 +86,25 @@ def scan_dry_run():
                                 print(f"   Line: {line.strip()}")
                                 print()
                                 found_count += 1
+                                flagged_files.add(file_path)
                                 break
-            except: continue
+            except: 
+                continue
     
-    print(f"✅ Scan complete. Found {found_count} items requiring review.")
+    print(f"\n{'='*60}")
+    if found_count > 0:
+        print(f"❌ SCAN FAILED: Found {found_count} potential secret(s) in {len(flagged_files)} file(s)")
+        print(f"\nRecommendations:")
+        print(f"  1. Move secrets to group_vars/all.yml")
+        print(f"  2. Encrypt: ansible-vault encrypt group_vars/all.yml")
+        print(f"  3. Reference in playbooks: {{{{ vault_variable_name }}}}")
+        print(f"{'='*60}\n")
+        return 1  # Exit code 1 = secrets found
+    else:
+        print(f"✅ SCAN PASSED: No unencrypted secrets detected")
+        print(f"{'='*60}\n")
+        return 0  # Exit code 0 = clean
 
 if __name__ == "__main__":
-    scan_dry_run()
+    exit_code = scan_dry_run()
+    sys.exit(exit_code)

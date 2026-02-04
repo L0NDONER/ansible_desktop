@@ -32,6 +32,7 @@
         status_code: 200
         timeout: 10
       register: health_check
+      failed_when: false  # Never actually fail - just capture the result
       ignore_errors: yes
 
     # --- TASK 2: SSL EXPIRY CHECK (Monitoring Only) ---
@@ -63,7 +64,12 @@
 
     - name: Determine if VPN healing is required
       set_fact:
-        needs_healing: "{{ health_check.status in [502, 504] or health_check.failed }}"
+        needs_healing: >-
+          {{
+            (health_check.failed | default(false)) or
+            (health_check.status | default(0) in [502, 504]) or
+            (health_check.status | default(200)) != 200
+          }}
         cooldown_active: >-
           {{
             last_heal.stat.exists and 
