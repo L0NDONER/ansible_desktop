@@ -32,6 +32,9 @@ def scan_dry_run():
             continue
         
         for file in files:
+            # Skip documentation files
+            if file.endswith((".md", ".txt", "README")):
+                continue
             file_path = os.path.join(root, file)
             try:
                 with open(file_path, 'r', errors='ignore') as f:

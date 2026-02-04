@@ -25,7 +25,7 @@ from twilio.twiml.messaging_response import MessagingResponse
 app = Flask(__name__)
 
 # Configuration - get from environment or use defaults
-AUTHORIZED_NUMBER = os.getenv('AUTHORIZED_NUMBER', 'whatsapp:+447375272694')
+ALLOWED_NUMBER = os.getenv('ALLOWED_NUMBER', 'whatsapp:+44XXXXXXXXXX')
 DOWNLOADS_PATH = os.getenv('DOWNLOADS_PATH', '/home/martin/downloads')
 AUTODL_CONFIG = os.path.expanduser('~/.autodl/autodl.cfg')
 
@@ -109,7 +109,7 @@ def whatsapp_bot():
     resp = MessagingResponse()
     msg = resp.message()
 
-    if from_number != AUTHORIZED_NUMBER:
+    if from_number != ALLOWED_NUMBER:
         msg.body("Unauthorized access attempt.")
         return str(resp)
 
