@@ -26,6 +26,10 @@
         # --- INFRASTRUCTURE & MAINTENANCE ---
         - name: Apply SSH Hardening and Banners
           include_tasks: ssh_harden.yml
+          when: inventory_hostname != 'az'
+
+        - name: Manage Azure WireGuard VPN
+          include_tasks: azure_vpn_maintenance.yml
 
         - name: Install Third Party Software
           include_tasks: third-party-software.yml
