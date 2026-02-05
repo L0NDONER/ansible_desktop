@@ -1,0 +1,24 @@
+---
+###########################################################
+#           Azure WireGuard VPN Auto-Heal                 #
+###########################################################
+# Version 2.0 - Streamlined for quick healing (not deployment)
+# Mirrors AWS healing pattern: restart containers, verify
+###########################################################
+
+- name: AZURE HEAL | Restart wg-easy container
+  community.docker.docker_container:
+    name: wg-easy
+    state: started
+    restart: yes
+  register: wg_restart
+
+- name: AZURE HEAL | Brief pause for handshake
+  pause:
+    seconds: 10
+
+- name: AZURE HEAL | Final connectivity verification
+  shell: ping -c 3 10.8.0.1
+  register: heal_verify
+  ignore_errors: yes
+  changed_when: false

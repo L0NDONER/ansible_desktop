@@ -3,6 +3,8 @@
 #        Martin O'Flaherty: Third Party Software          #
 ###########################################################
 # Version History:
+# 0.08 - Added cleanup of legacy Docker repo files to
+#        prevent Signed-By conflicts
 # 0.07 - Fixed 'ubuntu_codename' undefined error by 
 #        moving fact-gathering to the top.
 ###########################################################
@@ -24,26 +26,32 @@
     ubuntu_codename: "{{ ansible_distribution_release }}"
   when: ansible_distribution == "Ubuntu"
 
-# --- GOOGLE CHROME (x86_64 Only) ---
+# --- GOOGLE CHROME (localhost/Minty Only) ---
 - name: Add Google Chrome GPG key
   ansible.builtin.get_url:
     url: https://dl.google.com/linux/linux_signing_key.pub
     dest: /usr/share/keyrings/google-chrome-keyring.asc
     mode: '0644'
-  when: ansible_architecture == "x86_64"
+  when: 
+    - ansible_architecture == "x86_64"
+    - inventory_hostname == "localhost"
 
 - name: Add Google Chrome repository
   apt_repository:
     repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.asc] http://dl.google.com/linux/chrome/deb/ stable main"
     state: present
     filename: google-chrome
-  when: ansible_architecture == "x86_64"
+  when: 
+    - ansible_architecture == "x86_64"
+    - inventory_hostname == "localhost"
 
 - name: Install Google Chrome
   package:
     name: google-chrome-stable
     state: present
-  when: ansible_architecture == "x86_64"
+  when: 
+    - ansible_architecture == "x86_64"
+    - inventory_hostname == "localhost"
 
 # --- DOCKER SECTION (x86_64 Only) ---
 - name: Purge conflicting Ubuntu-native container packages
@@ -51,6 +59,15 @@
     name: [docker.io, docker-doc, docker-compose, containerd, runc]
     state: absent
     purge: yes
+  when: ansible_architecture == "x86_64"
+
+- name: Remove legacy Docker repository files (prevent Signed-By conflicts)
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/docker.list
+    - /etc/apt/keyrings/docker.asc
   when: ansible_architecture == "x86_64"
 
 - name: Add Docker GPG key

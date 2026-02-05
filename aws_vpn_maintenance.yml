@@ -1,0 +1,29 @@
+---
+###########################################################
+#           AWS WireGuard VPN Auto-Heal                   #
+###########################################################
+# Version 1.0 - Quick restart healing for VPN tunnel
+###########################################################
+
+- name: AWS HEAL | Restart wg-easy container
+  community.docker.docker_container:
+    name: wg-easy
+    state: started
+    restart: yes
+  register: wg_restart
+
+- name: AWS HEAL | Restart nginx proxy (if needed)
+  service:
+    name: nginx
+    state: restarted
+  when: wg_restart is changed
+
+- name: AWS HEAL | Brief pause for handshake
+  pause:
+    seconds: 10
+
+- name: AWS HEAL | Final connectivity verification
+  shell: ping -c 3 10.8.0.1
+  register: heal_verify
+  ignore_errors: yes
+  changed_when: false

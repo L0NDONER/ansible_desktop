@@ -1,0 +1,108 @@
+---
+# Azure WireGuard VPN Deployment (wg-easy)
+# Idempotent playbook - safe to run multiple times
+# Replaces linuxserver/wireguard with wg-easy on first run
+# Subsequent runs only update if configuration changes
+
+- name: Deploy wg-easy VPN on Azure
+  hosts: az
+  become: yes
+  vars:
+    # Generate password hash:
+    # docker run --rm ghcr.io/wg-easy/wg-easy wgpw 'YOUR_PASSWORD'
+    web_ui_password_hash: '$2a$12$Kf7CKJhv6.B5dHe1zK1XCuIXOiZAWC5mUXT1ff2MZPhf1ubIgxoQK'
+    wireguard_port: 51820
+    web_ui_port: 51821
+
+  tasks:
+    - name: 1. Check for legacy linuxserver/wireguard container
+      shell: docker ps -a --filter "name=wireguard" --filter "ancestor=linuxserver/wireguard" --format "{{ '{{' }}.Names{{ '}}' }}"
+      register: old_wireguard_check
+      changed_when: false
+      failed_when: false
+
+    - name: 2. Remove legacy linuxserver/wireguard container (if found)
+      community.docker.docker_container:
+        name: wireguard
+        state: absent
+        force_kill: yes
+      when: 
+        - old_wireguard_check.rc == 0
+        - old_wireguard_check.stdout | length > 0
+
+    - name: 3. Get public IP address
+      block:
+        - name: Try Azure metadata service first
+          uri:
+            url: http://169.254.169.254/metadata/instance/network/interface/0/ipv4/ipAddress/0/publicIpAddress?api-version=2021-02-01&format=text
+            headers:
+              Metadata: "true"
+            return_content: yes
+          register: azure_public_ip
+          failed_when: false
+
+        - name: Fallback to external IP detection if Azure metadata empty
+          uri:
+            url: https://api.ipify.org
+            return_content: yes
+          register: external_ip
+          when: azure_public_ip.content | default('') | trim == ''
+
+        - name: Set public IP variable
+          set_fact:
+            public_ip: "{{ (azure_public_ip.content | default('') | trim) if (azure_public_ip.content | default('') | trim != '') else external_ip.content | trim }}"
+
+    - name: 4. Enable IP forwarding (required for VPN routing)
+      sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        state: present
+        reload: yes
+
+    - name: 5. Create WireGuard configuration directory
+      file:
+        path: /etc/wireguard
+        state: directory
+        mode: '0700'
+
+    - name: 6. Deploy wg-easy container
+      community.docker.docker_container:
+        name: wg-easy
+        image: ghcr.io/wg-easy/wg-easy
+        state: started
+        restart_policy: unless-stopped
+        pull: yes
+        recreate: no
+        capabilities:
+          - NET_ADMIN
+          - SYS_MODULE
+        volumes:
+          - /etc/wireguard:/etc/wireguard
+        ports:
+          - "{{ wireguard_port }}:51820/udp"
+          - "{{ web_ui_port }}:51821/tcp"
+        env:
+          WG_HOST: "{{ public_ip }}"
+          PASSWORD_HASH: "{{ web_ui_password_hash }}"
+          WG_PORT: "{{ wireguard_port | string }}"
+          WG_DEFAULT_DNS: "1.1.1.1"
+          WG_ALLOWED_IPS: "0.0.0.0/0"
+        sysctls:
+          net.ipv4.conf.all.src_valid_mark: "1"
+          net.ipv4.ip_forward: "1"
+
+    - name: 7. Display VPN connection details
+      debug:
+        msg:
+          - "=========================================="
+          - "WireGuard VPN Status"
+          - "=========================================="
+          - "Public IP: {{ public_ip }}"
+          - "Web UI: http://{{ public_ip }}:{{ web_ui_port }}"
+          - "WireGuard Port: {{ wireguard_port }}/udp"
+          - ""
+          - "Next steps:"
+          - "1. Open web UI in browser"
+          - "2. Login with your password"
+          - "3. Create VPN clients"
+          - "4. Download .conf files or scan QR codes"
