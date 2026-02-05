@@ -3,104 +3,31 @@
 WhatsApp Commander Bot - Minty Server Control via Twilio
 
 Version History:
-0.1 - Initial TV/Movie filter management
-0.2 - Added manual update trigger
-0.3 - Added seeding status integration
-0.4 - Added VPN healing and system stats commands
-
-Commands:
-- update: Trigger ansible-pull manually
-- healvpn/fixvpn: Restart VPN infrastructure
-- addtv <name>: Add TV show filter to autodl
-- addmovie <name>: Add movie filter to autodl
-- seeding/status: Check seeding ratios
-- stats/system: System resource usage
+0.1 - 0.5: Filter management, pingall, reboots, and basic stats
+0.6 - Added Fleet Dashboard integration
+0.7 - Integrated remote uptime parsing for Dashboard
 """
 import subprocess
 import os
 import re
+import logging
+import json
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 
+# --- LOGGING SETUP ---
+logging.basicConfig(
+    filename=os.path.expanduser('~/commander_audit.log'),
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
 app = Flask(__name__)
 
-# Configuration - get from environment or use defaults
+# --- CONFIGURATION ---
 ALLOWED_NUMBER = os.getenv('ALLOWED_NUMBER', 'whatsapp:+44XXXXXXXXXX')
-DOWNLOADS_PATH = os.getenv('DOWNLOADS_PATH', '/home/martin/downloads')
 AUTODL_CONFIG = os.path.expanduser('~/.autodl/autodl.cfg')
-
-def sanitize_filter_name(name):
-    """Convert show/movie name to valid filter name"""
-    return re.sub(r'[^a-z0-9_]', '_', name.lower())
-
-def add_tv_filter(show_name):
-    """Add a TV show filter to autodl.cfg"""
-    filter_name = sanitize_filter_name(show_name)
-    
-    filter_config = f"""
-[filter {filter_name}]
-enabled=true
-match-releases=*{show_name}*
-match-sites=ipt,tl
-resolutions=1080p,2160p
-min-size=500MB
-"""
-    
-    try:
-        # Check if filter already exists
-        with open(AUTODL_CONFIG, 'r') as f:
-            content = f.read()
-            if f'[filter {filter_name}]' in content:
-                return f"❌ Filter '{show_name}' already exists!"
-        
-        # Append new filter
-        with open(AUTODL_CONFIG, 'a') as f:
-            f.write(filter_config)
-        
-        # Reload autodl-irssi by sending command to screen session
-        subprocess.run(
-            ['screen', '-S', 'irssi', '-X', 'stuff', '/autodl update\n'],
-            check=False
-        )
-        
-        return f"✅ Added TV show: {show_name}"
-    except Exception as e:
-        return f"❌ Error adding filter: {str(e)}"
-
-def add_movie_filter(movie_name):
-    """Add a movie filter to autodl.cfg"""
-    filter_name = sanitize_filter_name(movie_name)
-    
-    filter_config = f"""
-[filter {filter_name}]
-enabled=true
-match-releases=*{movie_name}*
-match-sites=ipt,tl
-resolutions=1080p,2160p
-min-size=1GB
-max-size=30GB
-"""
-    
-    try:
-        # Check if filter already exists
-        with open(AUTODL_CONFIG, 'r') as f:
-            content = f.read()
-            if f'[filter {filter_name}]' in content:
-                return f"❌ Filter '{movie_name}' already exists!"
-        
-        # Append new filter
-        with open(AUTODL_CONFIG, 'a') as f:
-            f.write(filter_config)
-        
-        # Reload autodl-irssi by sending command to screen session
-        subprocess.run(
-            ['screen', '-S', 'irssi', '-X', 'stuff', '/autodl update\n'],
-            check=False
-        )
-        
-        return f"✅ Added movie: {movie_name}"
-    except Exception as e:
-        return f"❌ Error adding filter: {str(e)}"
+INVENTORY_PATH = os.path.expanduser('~/ansible/inventory.ini')
 
 @app.route("/webhook", methods=['POST'])
 def whatsapp_bot():
@@ -110,99 +37,69 @@ def whatsapp_bot():
     msg = resp.message()
 
     if from_number != ALLOWED_NUMBER:
+        logging.warning(f"Unauthorized access attempt from {from_number}")
         msg.body("Unauthorized access attempt.")
         return str(resp)
 
-    # Parse command
+    logging.info(f"Command received: {incoming_msg}")
     incoming_lower = incoming_msg.lower()
 
-    # Manual Update Trigger
-    if incoming_lower == 'update':
+    # 1. Full Fleet Dashboard (v0.7)
+    if incoming_lower in ['stats', 'fleet', 'dashboard']:
+        hosts = ['localhost', 'aws', 'az', 'pi']
+        response = "🌍 *Minty Fleet Dashboard*\n"
+        
+        for host in hosts:
+            try:
+                # Fetch the health artifact from the host
+                raw = subprocess.check_output(
+                    ["ssh", host, "cat /tmp/fleet_health.json"], 
+                    timeout=3
+                ).decode()
+                data = json.loads(raw)
+                response += f"\n{data['net']} *{host.upper()}* {data['docker']}"
+                response += f"\n└ ⏱️ {data['uptime']} (at {data['time']})"
+            except Exception:
+                response += f"\n🔴 *{host.upper()}* ⚠️ (Offline/Unreachable)"
+        
+        msg.body(response)
+
+    # 2. Fleet-wide Ping
+    elif incoming_lower == 'pingall':
         try:
-            subprocess.Popen(["sudo", "systemctl", "start", "ansible-pull.service"])
-            msg.body("🚀 Update triggered manually! Expect a 'Smooth as butter' message soon.")
+            output = subprocess.check_output(["ansible", "all", "-m", "ping", "-i", INVENTORY_PATH]).decode()
+            success_count = output.count('"ping": "pong"')
+            total_hosts = output.count('=>')
+            status_emoji = "🟢" if success_count == total_hosts else "🟡"
+            msg.body(f"{status_emoji} *Fleet Health*\n✅ Online: {success_count}/{total_hosts}")
         except Exception as e:
             msg.body(f"❌ Error: {str(e)}")
 
-    # VPN Restart/Heal
-    elif incoming_lower == 'healvpn' or incoming_lower == 'fixvpn':
-        try:
-            subprocess.Popen([
-                "ansible-playbook", 
-                os.path.expanduser("~/ansible/aws.yml"), 
-                "--tags", "wireguard",
-                "-i", os.path.expanduser("~/ansible/inventory.ini"),
-                "--vault-password-file", os.path.expanduser("~/.vault_pass")
-            ])
-            msg.body("🔧 VPN healing initiated! Check status in 30 seconds.")
-        except Exception as e:
-            msg.body(f"❌ Error: {str(e)}")
+    # 3. Targeted Reboot
+    elif incoming_lower.startswith('reboot '):
+        target_host = incoming_msg[7:].strip().lower()
+        subprocess.Popen(["ansible", target_host, "-a", "/sbin/reboot", "-i", INVENTORY_PATH, "--become"])
+        msg.body(f"🌀 Reboot command sent to: *{target_host}*")
 
-    # Add TV Show
-    elif incoming_lower.startswith('addtv '):
-        show_name = incoming_msg[6:].strip()
-        if show_name:
-            result = add_tv_filter(show_name)
-            msg.body(result)
-        else:
-            msg.body("❌ Usage: addtv <show name>")
+    # 4. Manual Update Trigger
+    elif incoming_lower == 'update':
+        subprocess.Popen(["sudo", "systemctl", "start", "ansible-pull.service"])
+        msg.body("🚀 Update triggered manually!")
 
-    # Add Movie
-    elif incoming_lower.startswith('addmovie '):
-        movie_name = incoming_msg[9:].strip()
-        if movie_name:
-            result = add_movie_filter(movie_name)
-            msg.body(result)
-        else:
-            msg.body("❌ Usage: addmovie <movie name>")
+    # 5. VPN Restart/Heal
+    elif incoming_lower in ['healvpn', 'fixvpn']:
+        subprocess.Popen([
+            "ansible-playbook", os.path.expanduser("~/ansible/aws.yml"), 
+            "--tags", "wireguard", "-i", INVENTORY_PATH,
+            "--vault-password-file", os.path.expanduser("~/.vault_pass")
+        ])
+        msg.body("🔧 VPN healing initiated!")
 
-    # Seeding Status Summary
-    elif 'seeding' in incoming_lower or 'status' in incoming_lower:
-        try:
-            from dashboard import get_seeding_status
-            data, _ = get_seeding_status(DOWNLOADS_PATH)
-            safe_count = sum(1 for f in data if f["IsSafe"])
-            
-            response = f"🌱 *Minty Seeding Status*\n"
-            response += f"📦 Total Files: {len(data)}\n"
-            response += f"✅ Ready for Cleanup: {safe_count}\n"
-            
-            if safe_count > 0:
-                response += "\n*Safe to remove:* " + ", ".join([f["File"] for f in data if f["IsSafe"]][:3])
-            msg.body(response)
-        except Exception as e:
-            msg.body(f"⚠️ Dashboard error: {str(e)}")
-
-    # System Stats
-    elif incoming_lower == 'stats' or incoming_lower == 'system':
-        try:
-            # Get uptime
-            uptime = subprocess.check_output(['uptime', '-p']).decode().strip()
-            # Get disk usage
-            df = subprocess.check_output(['df', '-h', '/']).decode().split('\n')[1].split()
-            disk_used = df[4]
-            # Get memory
-            mem = subprocess.check_output(['free', '-h']).decode().split('\n')[1].split()
-            mem_used = f"{mem[2]}/{mem[1]}"
-            
-            response = f"💻 *Minty System Stats*\n"
-            response += f"⏰ {uptime}\n"
-            response += f"💾 Disk: {disk_used} used\n"
-            response += f"🧠 RAM: {mem_used}\n"
-            msg.body(response)
-        except Exception as e:
-            msg.body(f"❌ Error: {str(e)}")
-
+    # Default Help Menu
     else:
-        msg.body("Hi Martin! Commands:\n• update\n• healvpn / fixvpn\n• addtv <show name>\n• addmovie <movie name>\n• seeding / status\n• stats / system")
+        msg.body("Hi Martin! Commands:\n• *fleet*: Full Dashboard\n• *pingall*: Connectivity check\n• *reboot <host>*\n• *update*: Run ansible-pull")
 
     return str(resp)
 
-@app.route("/", methods=['GET'])
-def health_check():
-    return "Commander Bot is running! 🚀", 200
-
 if __name__ == "__main__":
-    # Run Flask app
-    port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
