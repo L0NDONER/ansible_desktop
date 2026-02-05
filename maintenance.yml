@@ -13,9 +13,6 @@
   hosts: all
   become: yes
   
-  vars_files:
-    - group_vars/all.yml
-
   tasks:
     - name: Main Fleet Update Block
       block:
