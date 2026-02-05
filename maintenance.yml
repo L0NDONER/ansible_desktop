@@ -112,8 +112,14 @@
         msg: |
           🎬 *Ansible Fleet Update Complete*
           ✅ *Status:* Smooth as butter.
-          {% if 'true' in ansible_play_hosts_all | map('extract', hostvars, 'needs_vpn_heal') | list | map('string') %}
-          🩹 *Note:* VPN tunnels were healed during this run.
+          {% set healed = [] %}
+          {% for host in ansible_play_hosts_all %}
+          {%   if hostvars[host].needs_vpn_heal | default(false) %}
+          {%     set _ = healed.append(host) %}
+          {%   endif %}
+          {% endfor %}
+          {% if healed %}
+          🩹 *Note:* VPN healed on {{ healed | join(', ') }}
           {% endif %}
           📋 *Version:* 0.21 auto-heal module
       delegate_to: localhost
