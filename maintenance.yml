@@ -3,10 +3,9 @@
 #        Martin O'Flaherty: Fleet Maintenance             #
 ###########################################################
 # Version History:
-# 0.10 - 0.18: Consolidated fleet reporting
-# 0.19 - Added Global Health Artifact generation
-# 0.20 - Integrated pretty-uptime for Fleet Dashboard
-# 0.21 - Added Auto-Healing VPN logic (Azure & AWS)
+# 0.10 - 0.21: Initial logic and consolidated reporting
+# 0.22 - 0.23: Added pathing fixes for local execution
+# 0.24 - Finalized absolute paths using {{ playbook_dir }}
 ###########################################################
 
 - name: System Maintenance and Updates
@@ -18,10 +17,10 @@
       block:
         # --- INFRASTRUCTURE & MAINTENANCE ---
         - name: Apply SSH Hardening and Banners
-          include_tasks: ssh_harden.yml
+          include_tasks: "{{ playbook_dir }}/ssh_harden.yml"
           when: inventory_hostname != 'az'
 
-        # --- AUTO-HEALING VPN LOGIC (v0.21) ---
+        # --- AUTO-HEALING VPN LOGIC ---
         - name: VPN Tunnel Pulse Check
           # Pings the internal gateway; works for both Azure and AWS tunnels
           shell: ping -c 2 10.8.0.1
@@ -36,23 +35,23 @@
           when: "inventory_hostname in ['az', 'aws']"
 
         - name: Auto-Heal Azure VPN
-          include_tasks: azure_vpn_maintenance.yml
+          include_tasks: "{{ playbook_dir }}/azure_vpn_maintenance.yml"
           when: 
             - inventory_hostname == 'az'
             - needs_vpn_heal | default(false)
 
         - name: Auto-Heal AWS VPN
-          include_tasks: aws_vpn_maintenance.yml
+          include_tasks: "{{ playbook_dir }}/aws_vpn_maintenance.yml"
           when: 
             - inventory_hostname == 'aws'
             - needs_vpn_heal | default(false)
 
         # --- STANDARD MAINTENANCE ---
         - name: Install Third Party Software
-          include_tasks: third-party-software.yml
+          include_tasks: "{{ playbook_dir }}/third-party-software.yml"
 
         - name: Run System Updates
-          include_tasks: update.yml
+          include_tasks: "{{ playbook_dir }}/update.yml"
 
         - name: Check for Reboot
           stat:
@@ -65,7 +64,7 @@
             reboot_timeout: 3600
           when: reboot_required_file.stat.exists
 
-        # --- GLOBAL HEALTH ARTIFACT GENERATION (v0.21) ---
+        # --- GLOBAL HEALTH ARTIFACT GENERATION ---
         - name: Generate Health Artifact
           shell: |
             ping -c 1 8.8.8.8 > /dev/null 2>&1 && NET="🟢" || NET="🔴"
@@ -97,6 +96,7 @@
               🚨 *Ansible Fleet ALERT*
               🖥️ *Host:* {{ inventory_hostname }}
               ❌ *Status:* FAILED
+              🔍 *Note:* Check if all maintenance .yml files exist in {{ playbook_dir }}
           delegate_to: localhost
           when: not ansible_check_mode
 
@@ -118,7 +118,7 @@
           {% if healed %}
           🩹 *Note:* VPN healed on {{ healed | join(', ') }}
           {% endif %}
-          📋 *Version:* 0.21 auto-heal module
+          📋 *Version:* 0.24 (Absolute Pathing)
       delegate_to: localhost
       run_once: true
       when: not ansible_check_mode
