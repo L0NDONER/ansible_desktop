@@ -25,7 +25,7 @@ logging.basicConfig(
 app = Flask(__name__)
 
 # --- CONFIGURATION ---
-ALLOWED_NUMBER = os.getenv('ALLOWED_NUMBER', 'whatsapp:+44XXXXXXXXXX')
+ALLOWED_NUMBER = os.getenv('ALLOWED_NUMBER', 'whatsapp:+447375272694')
 AUTODL_CONFIG = os.path.expanduser('~/.autodl/autodl.cfg')
 INVENTORY_PATH = os.path.expanduser('~/ansible/inventory.ini')
 
