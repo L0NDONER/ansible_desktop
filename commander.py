@@ -51,11 +51,16 @@ def whatsapp_bot():
         
         for host in hosts:
             try:
-                # Fetch the health artifact from the host
-                raw = subprocess.check_output(
-                    ["ssh", host, "cat /tmp/fleet_health.json"], 
-                    timeout=3
-                ).decode()
+                # Read localhost directly, SSH to remote hosts
+                if host == 'localhost':
+                    with open('/tmp/fleet_health.json', 'r') as f:
+                        raw = f.read()
+                else:
+                    raw = subprocess.check_output(
+                        ["ssh", host, "cat /tmp/fleet_health.json"], 
+                        timeout=3
+                    ).decode()
+                
                 data = json.loads(raw)
                 response += f"\n{data['net']} *{host.upper()}* {data['docker']}"
                 response += f"\n└ ⏱️ {data['uptime']} (at {data['time']})"
