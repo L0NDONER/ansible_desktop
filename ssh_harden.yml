@@ -5,7 +5,7 @@
     content: |
       #################################################################################
       #                                                                               #
-      #             IF YOU ARE NOT MARTIN OR UBUNTU, KINDLY FUCK OFF.                 #
+      #             IF YOU ARE NOT MARTIN OR UBUNTU, KINDLY DISAPPEAR L0NDONER.               #
       #                                                                               #
       #################################################################################
     mode: '0644'
@@ -20,5 +20,5 @@
     - { regexp: '^#?Banner',                 line: 'Banner /etc/ssh/banner.txt' }
     - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
     - { regexp: '^#?PermitRootLogin',        line: 'PermitRootLogin no' }
-    - { regexp: '^#?AllowUsers',             line: 'AllowUsers martin ubuntu' }
+    - { regexp: '^#?AllowUsers',             line: 'AllowUsers martin ubuntu L0NDONER' }
   notify: restart sshd
