@@ -7,6 +7,7 @@
 # 0.22 - 0.24: Pathing fixes and absolute paths
 # 0.25: Added Security Audit (SSH Knock Count)
 # 0.26: Added Fail2Ban Jail Count
+# 0.27: Fleet-wide security summary in completion notification
 ###########################################################
 
 - name: System Maintenance and Updates
@@ -114,6 +115,12 @@
           delegate_to: localhost
           when: not ansible_check_mode
 
+    - name: Collect Fleet Security Stats
+      set_fact:
+        total_knocks: "{{ ansible_play_hosts | map('extract', hostvars) | map(attribute='ssh_knocks', default={'stdout': '0'}) | map(attribute='stdout') | map('int') | sum }}"
+        total_jails: "{{ ansible_play_hosts | map('extract', hostvars) | map(attribute='jail_count', default={'stdout': '0'}) | map(attribute='stdout') | map('int') | sum }}"
+      run_once: true
+
     - name: Send Consolidated Success WhatsApp
       community.general.twilio:
         account_sid: "{{ twilio_sid }}"
@@ -122,8 +129,9 @@
         to_number: "whatsapp:{{ my_mobile_number }}"
         msg: |
           🎬 *Ansible Fleet Update Complete*
-          ✅ *Status:* Smooth as butter.
-          📋 *Version:* 0.26 (Jail Count Added)
+          ✅ *Status:* Smooth as butter
+          🛡️ *Security:* {{ total_knocks | default(0) }} knocks | {{ total_jails | default(0) }} jailed
+          📋 *Version:* 0.27 (Security Summary)
       delegate_to: localhost
       run_once: true
       when: not ansible_check_mode
