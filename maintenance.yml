@@ -8,6 +8,7 @@
 # 0.25: Added Security Audit (SSH Knock Count)
 # 0.26: Added Fail2Ban Jail Count
 # 0.27: Fleet-wide security summary in completion notification
+# 0.28: Integrated Flatpak Audit for Desktop Apps
 ###########################################################
 
 - name: System Maintenance and Updates
@@ -125,7 +126,7 @@
           🎬 *Ansible Fleet Update Complete*
           ✅ *Status:* Smooth as butter
           🛡️ *Security:* {{ groups['all'] | map('extract', hostvars, 'ssh_knocks') | map(attribute='stdout', default='0') | map('int') | sum }} knocks | {{ groups['all'] | map('extract', hostvars, 'jail_count') | map(attribute='stdout', default='0') | map('int') | sum }} jailed
-          📋 *Version:* 0.27 (Security Summary)
+          📋 *Version:* 0.28 (Audit Integrated)
       delegate_to: localhost
       run_once: true
       when: not ansible_check_mode

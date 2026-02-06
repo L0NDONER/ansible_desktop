@@ -3,13 +3,15 @@
 #        Martin O'Flaherty: Third Party Software          #
 ###########################################################
 # Version History:
+# 0.28 - Added Flatpak Audit for Bitwarden and qBittorrent
+#        Ensures 'latest' state and removes legacy .debs
 # 0.08 - Added cleanup of legacy Docker repo files to
 #        prevent Signed-By conflicts
 # 0.07 - Fixed 'ubuntu_codename' undefined error by 
 #        moving fact-gathering to the top.
 ###########################################################
 
-# --- CODENAME DISCOVERY (Run this first!) ---
+# --- CODENAME DISCOVERY ---
 - name: Get Ubuntu base codename for Linux Mint
   shell: "grep CODENAME /etc/upstream-release/lsb-release | cut -d= -f2"
   register: mint_ubuntu_base
@@ -90,3 +92,35 @@
     state: present
     update_cache: yes
   when: ansible_architecture == "x86_64"
+
+# --- FLATPAK SOFTWARE AUDIT (localhost/Mint Only) ---
+- name: Ensure Flatpak is installed
+  package:
+    name: flatpak
+    state: present
+  when: inventory_hostname == "localhost"
+
+- name: Add Flathub repository
+  community.general.flatpak_remote:
+    name: flathub
+    state: present
+    flatpakrepo_url: https://dl.flathub.org/repo/flathub.flatpakrepo
+  when: inventory_hostname == "localhost"
+
+- name: Audit and Install Latest Flatpaks
+  community.general.flatpak:
+    name:
+      - com.bitwarden.desktop
+      - org.qbittorrent.qBittorrent
+    state: latest
+    remote: flathub
+  when: inventory_hostname == "localhost"
+
+- name: Remove native .deb versions to prevent duplicates
+  apt:
+    name: 
+      - bitwarden
+      - qbittorrent
+    state: absent
+    purge: yes
+  when: inventory_hostname == "localhost"
