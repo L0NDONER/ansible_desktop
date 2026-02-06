@@ -3,15 +3,18 @@
 #        Martin O'Flaherty: Third Party Software          #
 ###########################################################
 # Version History:
-# 0.28 - Added Flatpak Audit for Bitwarden and qBittorrent
+# 0.28 - Added Flatpak audit for Bitwarden and qBittorrent
 #        Ensures 'latest' state and removes legacy .debs
 # 0.08 - Added cleanup of legacy Docker repo files to
 #        prevent Signed-By conflicts
-# 0.07 - Fixed 'ubuntu_codename' undefined error by 
-#        moving fact-gathering to the top.
+# 0.07 - Fixed 'ubuntu_codename' undefined error by
+#        moving fact-gathering to the top
 ###########################################################
 
-# --- CODENAME DISCOVERY ---
+# =============================================================================
+# CODENAME DISCOVERY
+# =============================================================================
+
 - name: Get Ubuntu base codename for Linux Mint
   shell: "grep CODENAME /etc/upstream-release/lsb-release | cut -d= -f2"
   register: mint_ubuntu_base
@@ -28,13 +31,16 @@
     ubuntu_codename: "{{ ansible_distribution_release }}"
   when: ansible_distribution == "Ubuntu"
 
-# --- GOOGLE CHROME (localhost/Minty Only) ---
+# =============================================================================
+# GOOGLE CHROME (localhost/Minty only)
+# =============================================================================
+
 - name: Add Google Chrome GPG key
   ansible.builtin.get_url:
     url: https://dl.google.com/linux/linux_signing_key.pub
     dest: /usr/share/keyrings/google-chrome-keyring.asc
     mode: '0644'
-  when: 
+  when:
     - ansible_architecture == "x86_64"
     - inventory_hostname == "localhost"
 
@@ -43,7 +49,7 @@
     repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.asc] http://dl.google.com/linux/chrome/deb/ stable main"
     state: present
     filename: google-chrome
-  when: 
+  when:
     - ansible_architecture == "x86_64"
     - inventory_hostname == "localhost"
 
@@ -51,19 +57,27 @@
   package:
     name: google-chrome-stable
     state: present
-  when: 
+  when:
     - ansible_architecture == "x86_64"
     - inventory_hostname == "localhost"
 
-# --- DOCKER SECTION (x86_64 Only) ---
+# =============================================================================
+# DOCKER (x86_64 only)
+# =============================================================================
+
 - name: Purge conflicting Ubuntu-native container packages
   apt:
-    name: [docker.io, docker-doc, docker-compose, containerd, runc]
+    name:
+      - docker.io
+      - docker-doc
+      - docker-compose
+      - containerd
+      - runc
     state: absent
     purge: yes
   when: ansible_architecture == "x86_64"
 
-- name: Remove legacy Docker repository files (prevent Signed-By conflicts)
+- name: Remove legacy Docker repository files
   file:
     path: "{{ item }}"
     state: absent
@@ -84,16 +98,25 @@
     repo: "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-keyring.asc] https://download.docker.com/linux/ubuntu {{ ubuntu_codename }} stable"
     state: present
     filename: docker
-  when: ansible_architecture == "x86_64" and ubuntu_codename is defined
+  when:
+    - ansible_architecture == "x86_64"
+    - ubuntu_codename is defined
 
-- name: Install Official Docker Engine
+- name: Install official Docker Engine
   apt:
-    name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
     state: present
     update_cache: yes
   when: ansible_architecture == "x86_64"
 
-# --- FLATPAK SOFTWARE AUDIT (localhost/Mint Only) ---
+# =============================================================================
+# FLATPAK SOFTWARE (localhost/Minty only)
+# =============================================================================
+
 - name: Ensure Flatpak is installed
   package:
     name: flatpak
@@ -107,7 +130,7 @@
     flatpakrepo_url: https://dl.flathub.org/repo/flathub.flatpakrepo
   when: inventory_hostname == "localhost"
 
-- name: Audit and Install Latest Flatpaks
+- name: Install latest Flatpak applications
   community.general.flatpak:
     name:
       - com.bitwarden.desktop
@@ -118,7 +141,7 @@
 
 - name: Remove native .deb versions to prevent duplicates
   apt:
-    name: 
+    name:
       - bitwarden
       - qbittorrent
     state: absent
