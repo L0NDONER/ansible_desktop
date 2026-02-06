@@ -5,7 +5,8 @@
 # Version History:
 # 0.10 - 0.21: Initial logic and consolidated reporting
 # 0.22 - 0.23: Added pathing fixes for local execution
-# 0.24 - Finalized absolute paths using {{ playbook_dir }}
+# 0.24: Finalized absolute paths using {{ playbook_dir }}
+# 0.25: Added Security Audit (SSH Knock Count)
 ###########################################################
 
 - name: System Maintenance and Updates
@@ -22,7 +23,6 @@
 
         # --- AUTO-HEALING VPN LOGIC ---
         - name: VPN Tunnel Pulse Check
-          # Pings the internal gateway; works for both Azure and AWS tunnels
           shell: ping -c 2 10.8.0.1
           register: vpn_ping
           ignore_errors: yes
@@ -64,6 +64,13 @@
             reboot_timeout: 3600
           when: reboot_required_file.stat.exists
 
+        # --- SECURITY AUDIT ---
+        - name: Count Failed SSH attempts (Today)
+          shell: "grep 'Failed password' /var/log/auth.log | grep \"$(date +'%b %e')\" | wc -l"
+          register: ssh_knocks
+          ignore_errors: yes
+          changed_when: false
+
         # --- GLOBAL HEALTH ARTIFACT GENERATION ---
         - name: Generate Health Artifact
           shell: |
@@ -73,10 +80,10 @@
             else
               DOCKER="❌"
             fi
-            # Add VPN healing status icon (🩹) to the dashboard data
             HEAL="{{ needs_vpn_heal | default(false) | ternary('🩹', '') }}"
             UPTIME=$(uptime -p | sed 's/up //')
-            echo "{\"net\": \"$NET\", \"docker\": \"$DOCKER $HEAL\", \"time\": \"$(date +%H:%M)\", \"uptime\": \"$UPTIME\"}"
+            KNOCKS="{{ ssh_knocks.stdout | trim }}"
+            echo "{\"net\": \"$NET\", \"docker\": \"$DOCKER $HEAL\", \"time\": \"$(date +%H:%M)\", \"uptime\": \"$UPTIME\", \"knocks\": \"$KNOCKS\"}"
           register: health_out
           changed_when: false
 
@@ -118,7 +125,7 @@
           {% if healed %}
           🩹 *Note:* VPN healed on {{ healed | join(', ') }}
           {% endif %}
-          📋 *Version:* 0.24 (Absolute Pathing)
+          📋 *Version:* 0.25 (Security Audit Added)
       delegate_to: localhost
       run_once: true
       when: not ansible_check_mode

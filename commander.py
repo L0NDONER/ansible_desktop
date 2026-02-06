@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 WhatsApp Commander Bot - Minty Server Control via Twilio
-Version 0.8.0 - Dynamic Inventory Integration
+Version 0.8.1 - Dynamic Inventory & Shield Status
 """
 import subprocess
 import os
@@ -32,14 +32,11 @@ def get_dynamic_hosts():
     hosts = ['localhost']
     if not os.path.exists(INVENTORY_PATH):
         return hosts
-    
     try:
         with open(INVENTORY_PATH, 'r') as f:
             for line in f:
                 line = line.strip()
-                # Skip empty lines, comments, and group headers [like_this]
                 if line and not line.startswith(('[', '#', ';')):
-                    # Extract the first part (the hostname) before any variables
                     hostname = line.split()[0]
                     if hostname not in hosts:
                         hosts.append(hostname)
@@ -49,7 +46,6 @@ def get_dynamic_hosts():
 
 @app.route("/webhook", methods=['POST'])
 def whatsapp_bot():
-    # Trim and lowercase to handle auto-capitalization (e.g. "Fleet" vs "fleet")
     incoming_msg = request.values.get('Body', '').strip()
     incoming_lower = incoming_msg.lower() 
     from_number = request.values.get('From', '')
@@ -57,13 +53,12 @@ def whatsapp_bot():
     resp = MessagingResponse()
     msg = resp.message()
 
-    # Security Check against authorized list
     if from_number not in ALLOWED_NUMBERS:
         logging.warning(f"Unauthorized access from {from_number}")
         msg.body("Unauthorized access attempt.")
         return str(resp)
 
-    # 1. Full Fleet Dashboard (Dynamic)
+    # 1. Full Fleet Dashboard (Dynamic + Shield Stats)
     if incoming_lower in ['fleet', 'stats', 'dashboard']:
         hosts = get_dynamic_hosts()
         response = "🌐 *Minty Fleet Dashboard*\n"
@@ -74,7 +69,6 @@ def whatsapp_bot():
                     with open('/tmp/fleet_health.json', 'r') as f:
                         raw = f.read()
                 else:
-                    # Remote check via SSH
                     raw = subprocess.check_output(
                         ["ssh", host, "cat /tmp/fleet_health.json"], 
                         timeout=3
@@ -82,7 +76,8 @@ def whatsapp_bot():
                 
                 data = json.loads(raw)
                 response += f"\n{data['net']} *{host.upper()}* {data['docker']}"
-                response += f"\n├ ⏱️ {data['uptime']} (at {data['time']})"
+                response += f"\n├ ⏱️ {data['uptime']}"
+                response += f"\n└ 🛡️ {data.get('knocks', '0')} knocks blocked"
             except Exception:
                 response += f"\n🔴 *{host.upper()}* ⚠️ (Offline/Unreachable)"
         msg.body(response)
@@ -112,20 +107,16 @@ def whatsapp_bot():
             cpu_usage = psutil.cpu_percent(interval=1)
             memory = psutil.virtual_memory()
             disk = psutil.disk_usage('/')
-            
             stats = (
                 "📊 *Local System Resources*\n"
                 f"🖥️ *CPU:* {cpu_usage}%\n"
                 f"🧠 *RAM:* {memory.percent}% ({memory.available // (1024**2)}MB free)\n"
                 f"💾 *Disk:* {disk.percent}% usage"
             )
-            
-            # Check for temperature (Pi specific)
             if os.path.exists("/sys/class/thermal/thermal_zone0/temp"):
                 with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                     temp = int(f.read()) / 1000
                     stats += f"\n🌡️ *Temp:* {temp:.1f}°C"
-            
             msg.body(stats)
         except Exception as e:
             msg.body(f"❌ Error fetching stats: {str(e)}")
