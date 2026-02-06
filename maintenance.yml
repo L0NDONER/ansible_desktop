@@ -115,12 +115,6 @@
           delegate_to: localhost
           when: not ansible_check_mode
 
-    - name: Collect Fleet Security Stats
-      set_fact:
-        total_knocks: "{{ ansible_play_hosts | map('extract', hostvars) | map(attribute='ssh_knocks', default={'stdout': '0'}) | map(attribute='stdout') | map('int') | sum }}"
-        total_jails: "{{ ansible_play_hosts | map('extract', hostvars) | map(attribute='jail_count', default={'stdout': '0'}) | map(attribute='stdout') | map('int') | sum }}"
-      run_once: true
-
     - name: Send Consolidated Success WhatsApp
       community.general.twilio:
         account_sid: "{{ twilio_sid }}"
@@ -130,7 +124,7 @@
         msg: |
           🎬 *Ansible Fleet Update Complete*
           ✅ *Status:* Smooth as butter
-          🛡️ *Security:* {{ total_knocks | default(0) }} knocks | {{ total_jails | default(0) }} jailed
+          🛡️ *Security:* {{ groups['all'] | map('extract', hostvars, 'ssh_knocks') | map(attribute='stdout', default='0') | map('int') | sum }} knocks | {{ groups['all'] | map('extract', hostvars, 'jail_count') | map(attribute='stdout', default='0') | map('int') | sum }} jailed
           📋 *Version:* 0.27 (Security Summary)
       delegate_to: localhost
       run_once: true
