@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 WhatsApp Commander Bot - Minty Server Control via Twilio
-Version 0.7.4 - Added 'top' system monitoring command
+Version 0.8.0 - Dynamic Inventory Integration
 """
 import subprocess
 import os
@@ -19,13 +19,33 @@ logging.basicConfig(
 
 app = Flask(__name__)
 
-# --- MULTIPLE AUTHORIZED NUMBERS ---
+# --- CONFIGURATION ---
 ALLOWED_NUMBERS = [
     os.getenv('ALLOWED_NUMBER', 'whatsapp:+441174632546'), # Primary Number
     'whatsapp:+447375272694'                              # Your EE Number
 ]
 INVENTORY_PATH = os.path.expanduser('~/ansible/inventory.ini')
 VAULT_PASS_FILE = os.path.expanduser('~/.vault_pass')
+
+def get_dynamic_hosts():
+    """Parses inventory.ini to return a unique list of hostnames."""
+    hosts = ['localhost']
+    if not os.path.exists(INVENTORY_PATH):
+        return hosts
+    
+    try:
+        with open(INVENTORY_PATH, 'r') as f:
+            for line in f:
+                line = line.strip()
+                # Skip empty lines, comments, and group headers [like_this]
+                if line and not line.startswith(('[', '#', ';')):
+                    # Extract the first part (the hostname) before any variables
+                    hostname = line.split()[0]
+                    if hostname not in hosts:
+                        hosts.append(hostname)
+    except Exception as e:
+        logging.error(f"Failed to parse inventory: {e}")
+    return hosts
 
 @app.route("/webhook", methods=['POST'])
 def whatsapp_bot():
@@ -43,9 +63,9 @@ def whatsapp_bot():
         msg.body("Unauthorized access attempt.")
         return str(resp)
 
-    # 1. Full Fleet Dashboard
+    # 1. Full Fleet Dashboard (Dynamic)
     if incoming_lower in ['fleet', 'stats', 'dashboard']:
-        hosts = ['localhost', 'aws', 'az', 'pi']
+        hosts = get_dynamic_hosts()
         response = "🌐 *Minty Fleet Dashboard*\n"
         
         for host in hosts:
@@ -54,6 +74,7 @@ def whatsapp_bot():
                     with open('/tmp/fleet_health.json', 'r') as f:
                         raw = f.read()
                 else:
+                    # Remote check via SSH
                     raw = subprocess.check_output(
                         ["ssh", host, "cat /tmp/fleet_health.json"], 
                         timeout=3
