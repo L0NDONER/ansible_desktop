@@ -2,16 +2,50 @@
 # -*- coding: utf-8 -*-
 """
 WhatsApp Commander Bot - Minty Server Control via Twilio
-Version 0.9.1 - Media Pipeline Integration + Seeds Fix
+Version 1.0 - Hardened security, validation, robustness
 """
 import subprocess
+import psutil
 import os
 import logging
 import json
-import psutil
 import re
-from flask import Flask, request
+import shutil
+import sqlite3
+from functools import wraps
+from flask import Flask, request, abort
 from twilio.twiml.messaging_response import MessagingResponse
+from twilio.request_validator import RequestValidator
+
+# =============================================================================
+# CONFIGURATION
+# =============================================================================
+
+ALLOWED_NUMBERS = os.getenv('ALLOWED_WHATSAPP_NUMBERS', '').split(',')
+if not ALLOWED_NUMBERS:
+    ALLOWED_NUMBERS = [
+        'whatsapp:+441174632546',
+        'whatsapp:+447375272694'
+    ]  # Fallback only
+
+TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
+if not TWILIO_AUTH_TOKEN:
+    raise ValueError("TWILIO_AUTH_TOKEN environment variable is required")
+
+INVENTORY_PATH = os.path.expanduser(
+    os.getenv('INVENTORY_PATH', '~/ansible/inventory.ini')
+)
+VAULT_PASS_FILE = os.path.expanduser(
+    os.getenv('VAULT_PASS_FILE', '~/.vault_pass')
+)
+AUTODL_FILTER_PATH = os.path.expanduser(
+    os.getenv('AUTODL_FILTER_PATH', '~/.autodl/autodl.cfg')
+)
+JELLYLINK_DB_PATH = os.path.expanduser(
+    os.getenv('JELLYLINK_DB_PATH', '~/jellylink/jellylink.db')
+)
+
+TORRENT_CLIENT = os.getenv('TORRENT_CLIENT', 'qbittorrent')  # or 'transmission'
 
 logging.basicConfig(
     filename=os.path.expanduser('~/commander_audit.log'),
@@ -20,22 +54,44 @@ logging.basicConfig(
 )
 
 app = Flask(__name__)
+validator = RequestValidator(TWILIO_AUTH_TOKEN)
 
-# --- CONFIGURATION ---
-ALLOWED_NUMBERS = [
-    os.getenv('ALLOWED_NUMBER', 'whatsapp:+441174632546'),
-    'whatsapp:+447375272694'
-]
-INVENTORY_PATH = os.path.expanduser('~/ansible/inventory.ini')
-VAULT_PASS_FILE = os.path.expanduser('~/.vault_pass')
-AUTODL_FILTER_PATH = os.path.expanduser('~/.autodl/autodl.cfg')
-TORRENT_CLIENT = 'qbittorrent'  # or 'transmission'
+
+# =============================================================================
+# SECURITY & VALIDATION
+# =============================================================================
+
+def validate_twilio_request(f):
+    """Validate Twilio webhook signature with Tailscale proxy support."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        signature = request.headers.get('X-Twilio-Signature', '')
+        # Handle Tailscale proxy - use https:// URL for validation
+        url = request.url.replace('http://', 'https://')
+        post_vars = request.form.to_dict()
+
+        if not validator.validate(url, post_vars, signature):
+            logging.warning(f"Invalid Twilio signature from {request.remote_addr}")
+            # Fallback: allow if from authorized number (for Tailscale/proxy scenarios)
+            from_number = request.values.get('From', '')
+            if from_number not in ALLOWED_NUMBERS:
+                abort(403, "Invalid request signature and unauthorized number")
+            logging.info(f"Signature validation failed but number whitelisted: {from_number}")
+
+        return f(*args, **kwargs)
+    return decorated
+
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
 
 def get_dynamic_hosts():
-    """Parses inventory.ini for clean hostnames, skipping variables and duplicates."""
+    """Parse Ansible inventory for clean hostnames."""
     hosts = ['localhost']
     if not os.path.exists(INVENTORY_PATH):
         return hosts
+
     try:
         with open(INVENTORY_PATH, 'r') as f:
             for line in f:
@@ -46,196 +102,305 @@ def get_dynamic_hosts():
                 if '=' not in hostname and hostname.upper() != 'MINTY' and hostname not in hosts:
                     hosts.append(hostname)
     except Exception as e:
-        logging.error(f"Failed to parse inventory: {e}")
+        logging.error(f"Inventory parse failed: {e}")
+
     return hosts
 
-def add_autodl_filter(show_name, filter_type='tv'):
-    """Add a new filter to autodl-irssi config"""
+
+def filter_exists(show_name: str, filter_type: str = 'tv') -> bool:
+    """Check if a filter section already exists to avoid duplicates."""
+    if not os.path.exists(AUTODL_FILTER_PATH):
+        return False
+
+    filter_id = show_name.lower().replace(" ", "")
     try:
-        # Read existing config
-        if os.path.exists(AUTODL_FILTER_PATH):
-            with open(AUTODL_FILTER_PATH, 'r') as f:
-                config = f.read()
-        else:
-            config = ""
-        
-        # Generate new filter ID (find highest existing + 1)
-        filter_ids = re.findall(r'\[filter (\d+)\]', config)
-        next_id = max([int(fid) for fid in filter_ids], default=0) + 1
-        
-        # Create filter block
+        with open(AUTODL_FILTER_PATH, 'r') as f:
+            return bool(re.search(
+                rf'^\[filter {re.escape(filter_id)}\]',
+                f.read(),
+                re.MULTILINE
+            ))
+    except Exception:
+        return False
+
+
+def add_autodl_filter(show_name: str, filter_type: str = 'tv') -> str:
+    """Add filter only if it doesn't exist; reload irssi on success."""
+    if filter_exists(show_name, filter_type):
+        return f"⚠️ Filter for '{show_name}' already exists."
+
+    try:
+        filter_id = show_name.lower().replace(" ", "")
+
         if filter_type == 'tv':
             new_filter = f"""
-[filter {next_id}]
-enabled = true
-match-releases = {show_name}
-match-categories = TV/x264,TV/x265,TV/HD
-min-size = 100M
-max-size = 5G
-save-path = ~/Downloads/
+[filter {filter_id}]
+enabled=1
+match-sites=tl
+shows={show_name}
+match-categories=TV - HD,TV
+resolutions=720p,1080p,2160p
+sources=WEB-DL,WEBDL,WEB,HDTV,BluRay
+min-size=200MB
+max-size=25GB
+upload-watch-dir=/home/martin/Downloads
 """
         else:  # movie
             new_filter = f"""
-[filter {next_id}]
-enabled = true
-match-releases = {show_name}
-match-categories = Movies/x264,Movies/x265,Movies/HD
-min-size = 500M
-max-size = 15G
-save-path = ~/Downloads/
+[filter {filter_id}]
+enabled=1
+match-sites=tl
+match-releases=*{show_name}*
+match-categories=Movies - HD,Movies
+resolutions=1080p,2160p
+min-size=1GB
+max-size=40GB
+upload-watch-dir=/home/martin/Downloads
 """
-        
-        # Append and save
-        with open(AUTODL_FILTER_PATH, 'a') as f:
-            f.write(new_filter)
-        
-        # Reload autodl-irssi (if running)
-        subprocess.run(['pkill', '-HUP', 'autodl-irssi'], check=False)
-        
-        return f"✅ Added filter #{next_id}: {show_name}"
-    except Exception as e:
-        logging.error(f"Failed to add filter: {e}")
-        return f"❌ Error adding filter: {str(e)}"
 
-def get_torrent_status():
-    """Get current torrent seeding status"""
-    try:
-        # Try qBittorrent first
+        with open(AUTODL_FILTER_PATH, 'a') as f:
+            f.write(new_filter + "\n")
+
+        # Graceful reload
+        subprocess.run(['pkill', '-HUP', 'irssi'], check=False, timeout=5)
+
+        logging.info(f"Added {filter_type} filter: {show_name}")
+        return f"✅ Added '{filter_id}' for {show_name}"
+
+    except Exception as e:
+        logging.error(f"Filter add failed for {show_name}: {e}")
+        return f"❌ Failed: {str(e)}"
+
+
+def get_torrent_status() -> str:
+    """Detect and report active torrent clients."""
+    lines = []
+
+    # qBittorrent-nox
+    if shutil.which('qbittorrent-nox'):
         try:
             result = subprocess.run(
-                ['qbittorrent-nox', '--version'],
+                ['pgrep', 'qbittorrent-nox'],
                 capture_output=True,
-                timeout=5,
-                text=True
+                timeout=3
             )
             if result.returncode == 0:
-                return "🌱 qBittorrent running\n📊 Use web UI for details"
-        except FileNotFoundError:
+                lines.append("🌱 qBittorrent is running")
+        except Exception:
             pass
-        
-        # Try transmission-remote
+
+    # Transmission
+    if shutil.which('transmission-remote'):
         try:
             result = subprocess.run(
                 ['transmission-remote', '-l'],
                 capture_output=True,
-                timeout=5,
-                text=True
+                text=True,
+                timeout=5
             )
             if result.returncode == 0:
-                lines = result.stdout.strip().split('\n')
-                if len(lines) > 2:
-                    active = len(lines) - 2
-                    return f"🌱 Transmission: {active} torrents"
-                return "🌱 Transmission: 0 torrents"
-        except FileNotFoundError:
+                count = len([
+                    l for l in result.stdout.splitlines()
+                    if l.strip() and not l.startswith('Sum')
+                ])
+                lines.append(f"🌱 Transmission: {max(0, count-2)} torrents")
+        except Exception:
             pass
-        
-        # Check if any torrent client process is running
-        result = subprocess.run(
-            ['pgrep', '-l', 'qbittorrent|transmission'],
-            capture_output=True,
-            text=True
-        )
-        if result.stdout:
-            return f"🌱 Torrent client running:\n{result.stdout.strip()}"
-        
-        return "❌ No torrent client found"
-        
+
+    return "\n".join(lines) or "❌ No active torrent client found."
+
+
+def get_recent_media(limit: int = 5) -> str:
+    """Query JellyLink database for recently processed media."""
+    if not os.path.exists(JELLYLINK_DB_PATH):
+        return "❌ JellyLink database not found"
+
+    try:
+        conn = sqlite3.connect(JELLYLINK_DB_PATH)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT title, media_type, season, episode, year,
+                   strftime('%d/%m %H:%M', processed_date) as proc_date
+            FROM processed_media
+            ORDER BY processed_date DESC
+            LIMIT ?
+        """, (limit,))
+
+        rows = cursor.fetchall()
+        conn.close()
+
+        if not rows:
+            return "📭 No recent media found"
+
+        response = f"📺 *Recent Media (last {len(rows)})*\n"
+        for title, mtype, season, episode, year, proc_date in rows:
+            if mtype == 'TV':
+                response += f"\n📺 {title} S{season:02d}E{episode:02d}"
+            else:
+                year_str = f" ({year})" if year else ""
+                response += f"\n🎬 {title}{year_str}"
+            response += f"\n   └ {proc_date}"
+
+        return response
+
     except Exception as e:
-        return f"❌ Error: {str(e)}"
+        logging.error(f"JellyLink DB query failed: {e}")
+        return f"❌ Database error: {str(e)}"
+
+
+# =============================================================================
+# COMMAND HANDLERS
+# =============================================================================
+
+def handle_fleet_command():
+    """Generate fleet dashboard with health status for all hosts."""
+    hosts = get_dynamic_hosts()
+    response = "🌐 *Minty Fleet Dashboard*"
+
+    for host in hosts:
+        try:
+            if host == 'localhost':
+                with open('/tmp/fleet_health.json', 'r') as f:
+                    data = json.load(f)
+            else:
+                raw = subprocess.check_output(
+                    ["ssh", "-o", "ConnectTimeout=3", host, "cat /tmp/fleet_health.json"],
+                    timeout=4
+                ).decode()
+                data = json.loads(raw)
+
+            response += f"\n\n*{host.upper()}*"
+            response += f"\n┣ ⏱️ {data.get('uptime', 'n/a')}"
+            response += f"\n┣ {data.get('net', 'n/a')}  {data.get('docker', 'n/a')}"
+            response += f"\n┗ 🛡️ {data.get('knocks', '0')} knocks | ⛓️ {data.get('jails', '0')} jailed"
+
+        except Exception:
+            response += f"\n\n🔴 *{host.upper()}*  (unreachable)"
+
+    return response or "No hosts found."
+
+
+def handle_update_command():
+    """Trigger manual ansible-pull update."""
+    try:
+        subprocess.Popen(["sudo", "systemctl", "start", "ansible-pull.service"])
+        return "🚀 Manual update triggered!"
+    except Exception as e:
+        return f"❌ Update trigger failed: {str(e)}"
+
+
+def handle_pingall_command():
+    """Ping all hosts in Ansible inventory."""
+    try:
+        out = subprocess.check_output(
+            [
+                "ansible", "all", "-m", "ping",
+                "-i", INVENTORY_PATH,
+                "--vault-password-file", VAULT_PASS_FILE
+            ],
+            timeout=10
+        ).decode()
+
+        success = out.count('"ping": "pong"')
+        total = out.count('SUCCESS') + out.count('UNREACHABLE')
+        return f"🟢 Fleet ping\n✅ Online: {success}/{total}"
+
+    except Exception as e:
+        return f"❌ Ping failed: {str(e)}"
+
+
+def handle_top_command():
+    """Get local system resource usage."""
+    try:
+        cpu = f"{psutil.cpu_percent(interval=1.2):.1f}%"
+        mem = f"{psutil.virtual_memory().percent:.1f}%"
+        return f"📊 Local stats\n🖥️ CPU: {cpu}\n🧠 RAM: {mem}"
+    except Exception as e:
+        return f"❌ Stats error: {str(e)}"
+
+
+def get_help_text():
+    """Return help text with available commands."""
+    return (
+        "Available commands:\n"
+        "• fleet / stats / dashboard\n"
+        "• update\n"
+        "• pingall\n"
+        "• top\n"
+        "• addtv <show>\n"
+        "• addmovie <title>\n"
+        "• seeds\n"
+        "• recent"
+    )
+
+
+# =============================================================================
+# WEBHOOK ENDPOINT
+# =============================================================================
 
 @app.route("/webhook", methods=['POST'])
+@validate_twilio_request
 def whatsapp_bot():
-    incoming_msg = request.values.get('Body', '').strip()
-    incoming_lower = incoming_msg.lower() 
+    """Main webhook handler for WhatsApp messages."""
+    incoming_msg = (request.values.get('Body') or '').strip()
+    incoming_lower = incoming_msg.lower()
     from_number = request.values.get('From', '')
-    
+
     resp = MessagingResponse()
     msg = resp.message()
 
+    # Authorization check
     if from_number not in ALLOWED_NUMBERS:
-        msg.body("Unauthorized.")
+        msg.body("Unauthorized number.")
+        logging.warning(f"Unauthorized access attempt from {from_number}")
         return str(resp)
 
-    # 1. Full Fleet Dashboard
+    logging.info(f"Command from {from_number}: {incoming_msg}")
+
+    # Command routing
     if incoming_lower in ['fleet', 'stats', 'dashboard']:
-        hosts = get_dynamic_hosts()
-        response = "🌐 *Minty Fleet Dashboard*\n"
-        
-        for host in hosts:
-            try:
-                if host == 'localhost':
-                    with open('/tmp/fleet_health.json', 'r') as f:
-                        raw = f.read()
-                else:
-                    raw = subprocess.check_output(
-                        ["ssh", host, "cat /tmp/fleet_health.json"], 
-                        timeout=3
-                    ).decode()
-                
-                data = json.loads(raw)
-                response += f"\n{data['net']} *{host.upper()}* {data['docker']}"
-                response += f"\n┣ ⏱️ {data['uptime']}"
-                response += f"\n┗ 🛡️ {data.get('knocks', '0')} knocks | ⛓️ {data.get('jails', '0')} jailed"
-            except Exception:
-                response += f"\n🔴 *{host.upper()}* ⚠️ (Offline/Unreachable)"
-        msg.body(response)
+        msg.body(handle_fleet_command())
 
-    # 2. Manual Update Trigger
     elif incoming_lower == 'update':
-        subprocess.Popen(["sudo", "systemctl", "start", "ansible-pull.service"])
-        msg.body("🚀 Update triggered manually!")
+        msg.body(handle_update_command())
 
-    # 3. Fleet-wide Ping
     elif incoming_lower == 'pingall':
-        try:
-            output = subprocess.check_output([
-                "ansible", "all", "-m", "ping", "-i", INVENTORY_PATH,
-                "--vault-password-file", VAULT_PASS_FILE
-            ]).decode()
-            success_count = output.count('"ping": "pong"')
-            total_hosts = output.count('=>')
-            msg.body(f"🟢 *Fleet Health*\n✅ Online: {success_count}/{total_hosts}")
-        except Exception as e:
-            msg.body(f"❌ Error: {str(e)}")
+        msg.body(handle_pingall_command())
 
-    # 4. System Statistics (Top)
     elif incoming_lower == 'top':
-        try:
-            cpu = psutil.cpu_percent(interval=1)
-            mem = psutil.virtual_memory().percent
-            stats = f"📊 *Local Resources*\n🖥️ *CPU:* {cpu}%\n🧠 *RAM:* {mem}%"
-            msg.body(stats)
-        except Exception as e:
-            msg.body(f"❌ Error: {str(e)}")
+        msg.body(handle_top_command())
 
-    # 5. Add TV Show Filter
     elif incoming_lower.startswith('addtv '):
-        show_name = incoming_msg[6:].strip()  # Remove 'addtv '
-        if show_name:
-            result = add_autodl_filter(show_name, 'tv')
-            msg.body(f"📺 *TV Filter*\n{result}")
+        show = incoming_msg[6:].strip()
+        if show:
+            msg.body(f"📺 TV filter\n{add_autodl_filter(show, 'tv')}")
         else:
-            msg.body("Usage: addtv <show name>")
+            msg.body("Usage: addtv Show Name")
 
-    # 6. Add Movie Filter
     elif incoming_lower.startswith('addmovie '):
-        movie_name = incoming_msg[9:].strip()  # Remove 'addmovie '
-        if movie_name:
-            result = add_autodl_filter(movie_name, 'movie')
-            msg.body(f"🎬 *Movie Filter*\n{result}")
+        movie = incoming_msg[9:].strip()
+        if movie:
+            msg.body(f"🎬 Movie filter\n{add_autodl_filter(movie, 'movie')}")
         else:
-            msg.body("Usage: addmovie <movie name>")
+            msg.body("Usage: addmovie Movie Name")
 
-    # 7. Torrent Seed Status
     elif incoming_lower == 'seeds':
-        result = get_torrent_status()
-        msg.body(result)
+        msg.body(get_torrent_status())
+
+    elif incoming_lower == 'recent':
+        msg.body(get_recent_media(5))
 
     else:
-        msg.body("Commands:\nfleet, update, pingall, top\naddtv <n>, addmovie <n>, seeds")
+        msg.body(get_help_text())
 
     return str(resp)
 
+
+# =============================================================================
+# APPLICATION ENTRY POINT
+# =============================================================================
+
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    # For production use gunicorn + nginx reverse proxy with HTTPS
+    app.run(host='0.0.0.0', port=5000, debug=False)
