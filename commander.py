@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 WhatsApp Commander Bot - Minty Server Control via Twilio
-Version 0.8.2 - Refined Dynamic Inventory & Shield Display
+Version 0.8.3 - Jail Count & Clean Display
 """
 import subprocess
 import os
@@ -21,11 +21,11 @@ app = Flask(__name__)
 
 # --- CONFIGURATION ---
 ALLOWED_NUMBERS = [
-    os.getenv('ALLOWED_NUMBER', 'whatsapp:+441174632546'), # Primary Number
-    'whatsapp:+447375272694'                              # Your EE Number
+    os.getenv('ALLOWED_NUMBER', 'whatsapp:+441174632546'),
+    'whatsapp:+447375272694'
 ]
-INVENTORY_PATH = os.path.expanduser('~/ansible/inventory.ini') #
-VAULT_PASS_FILE = os.path.expanduser('~/.vault_pass') #
+INVENTORY_PATH = os.path.expanduser('~/ansible/inventory.ini')
+VAULT_PASS_FILE = os.path.expanduser('~/.vault_pass')
 
 def get_dynamic_hosts():
     """Parses inventory.ini for clean hostnames, skipping variables and duplicates."""
@@ -36,10 +36,8 @@ def get_dynamic_hosts():
         with open(INVENTORY_PATH, 'r') as f:
             for line in f:
                 line = line.strip()
-                # Skip comments, empty lines, and group headers like [web]
                 if not line or line.startswith(('[', '#', ';')):
                     continue
-                # Extract hostname (first part of line), skip if it's a variable definition
                 hostname = line.split()[0]
                 if '=' not in hostname and hostname.upper() != 'MINTY' and hostname not in hosts:
                     hosts.append(hostname)
@@ -57,8 +55,7 @@ def whatsapp_bot():
     msg = resp.message()
 
     if from_number not in ALLOWED_NUMBERS:
-        logging.warning(f"Unauthorized access from {from_number}")
-        msg.body("Unauthorized access attempt.") #
+        msg.body("Unauthorized.")
         return str(resp)
 
     # 1. Full Fleet Dashboard
@@ -78,16 +75,16 @@ def whatsapp_bot():
                     ).decode()
                 
                 data = json.loads(raw)
-                response += f"\n{data['net']} *{host.upper()}* {data['docker']}" #
-                response += f"\n┣ ⏱️ {data['uptime']}" #
-                response += f"\n┗ 🛡️ {data.get('knocks', '0')} knocks blocked" #
+                response += f"\n{data['net']} *{host.upper()}* {data['docker']}"
+                response += f"\n┣ ⏱️ {data['uptime']}"
+                response += f"\n┗ 🛡️ {data.get('knocks', '0')} knocks | ⛓️ {data.get('jails', '0')} jailed"
             except Exception:
-                response += f"\n🔴 *{host.upper()}* ⚠️ (Offline/Unreachable)" #
+                response += f"\n🔴 *{host.upper()}* ⚠️ (Offline/Unreachable)"
         msg.body(response)
 
     # 2. Manual Update Trigger
     elif incoming_lower == 'update':
-        subprocess.Popen(["sudo", "systemctl", "start", "ansible-pull.service"]) #
+        subprocess.Popen(["sudo", "systemctl", "start", "ansible-pull.service"])
         msg.body("🚀 Update triggered manually!")
 
     # 3. Fleet-wide Ping
@@ -99,34 +96,24 @@ def whatsapp_bot():
             ]).decode()
             success_count = output.count('"ping": "pong"')
             total_hosts = output.count('=>')
-            status_emoji = "🟢" if success_count == total_hosts else "🟡"
-            msg.body(f"{status_emoji} *Fleet Health*\n✅ Online: {success_count}/{total_hosts}") #
+            msg.body(f"🟢 *Fleet Health*\n✅ Online: {success_count}/{total_hosts}")
         except Exception as e:
             msg.body(f"❌ Error: {str(e)}")
 
     # 4. System Statistics (Top)
     elif incoming_lower == 'top':
         try:
-            cpu_usage = psutil.cpu_percent(interval=1)
-            memory = psutil.virtual_memory()
-            disk = psutil.disk_usage('/')
-            stats = (
-                "📊 *Local System Resources*\n"
-                f"🖥️ *CPU:* {cpu_usage}%\n"
-                f"🧠 *RAM:* {memory.percent}% ({memory.available // (1024**2)}MB free)\n"
-                f"💾 *Disk:* {disk.percent}% usage" #
-            )
-            if os.path.exists("/sys/class/thermal/thermal_zone0/temp"):
-                with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
-                    temp = int(f.read()) / 1000
-                    stats += f"\n🌡️ *Temp:* {temp:.1f}°C" #
+            cpu = psutil.cpu_percent(interval=1)
+            mem = psutil.virtual_memory().percent
+            stats = f"📊 *Local Resources*\n🖥️ *CPU:* {cpu}%\n🧠 *RAM:* {mem}%"
             msg.body(stats)
         except Exception as e:
-            msg.body(f"❌ Error fetching stats: {str(e)}")
+            msg.body(f"❌ Error: {str(e)}")
+
     else:
-        msg.body("Valid commands: fleet, update, pingall, top") #
+        msg.body("Valid commands: fleet, update, pingall, top")
 
     return str(resp)
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
+    app.run(host='0.0.0.0', port=5000)

@@ -4,9 +4,9 @@
 ###########################################################
 # Version History:
 # 0.10 - 0.21: Initial logic and consolidated reporting
-# 0.22 - 0.23: Added pathing fixes for local execution
-# 0.24: Finalized absolute paths using {{ playbook_dir }}
+# 0.22 - 0.24: Pathing fixes and absolute paths
 # 0.25: Added Security Audit (SSH Knock Count)
+# 0.26: Added Fail2Ban Jail Count
 ###########################################################
 
 - name: System Maintenance and Updates
@@ -71,6 +71,12 @@
           ignore_errors: yes
           changed_when: false
 
+        - name: Count Active Fail2Ban Jails
+          shell: "fail2ban-client status sshd | grep 'Currently banned:' | awk '{print $4}'"
+          register: jail_count
+          ignore_errors: yes
+          changed_when: false
+
         # --- GLOBAL HEALTH ARTIFACT GENERATION ---
         - name: Generate Health Artifact
           shell: |
@@ -82,8 +88,9 @@
             fi
             HEAL="{{ needs_vpn_heal | default(false) | ternary('🩹', '') }}"
             UPTIME=$(uptime -p | sed 's/up //')
-            KNOCKS="{{ ssh_knocks.stdout | trim }}"
-            echo "{\"net\": \"$NET\", \"docker\": \"$DOCKER $HEAL\", \"time\": \"$(date +%H:%M)\", \"uptime\": \"$UPTIME\", \"knocks\": \"$KNOCKS\"}"
+            KNOCKS="{{ ssh_knocks.stdout | trim | default('0') }}"
+            JAILS="{{ jail_count.stdout | trim | default('0') }}"
+            echo "{\"net\": \"$NET\", \"docker\": \"$DOCKER $HEAL\", \"time\": \"$(date +%H:%M)\", \"uptime\": \"$UPTIME\", \"knocks\": \"$KNOCKS\", \"jails\": \"$JAILS\"}"
           register: health_out
           changed_when: false
 
@@ -103,7 +110,7 @@
               🚨 *Ansible Fleet ALERT*
               🖥️ *Host:* {{ inventory_hostname }}
               ❌ *Status:* FAILED
-              🔍 *Note:* Check if all maintenance .yml files exist in {{ playbook_dir }}
+              🔍 *Note:* Check logs on {{ inventory_hostname }}
           delegate_to: localhost
           when: not ansible_check_mode
 
@@ -116,16 +123,7 @@
         msg: |
           🎬 *Ansible Fleet Update Complete*
           ✅ *Status:* Smooth as butter.
-          {% set healed = [] %}
-          {% for host in ansible_play_hosts_all %}
-          {%   if hostvars[host].needs_vpn_heal | default(false) %}
-          {%     set _ = healed.append(host) %}
-          {%   endif %}
-          {% endfor %}
-          {% if healed %}
-          🩹 *Note:* VPN healed on {{ healed | join(', ') }}
-          {% endif %}
-          📋 *Version:* 0.25 (Security Audit Added)
+          📋 *Version:* 0.26 (Jail Count Added)
       delegate_to: localhost
       run_once: true
       when: not ansible_check_mode
