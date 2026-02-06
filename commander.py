@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 WhatsApp Commander Bot - Minty Server Control via Twilio
-Version 0.8.3 - Jail Count & Clean Display
+Version 0.9.1 - Media Pipeline Integration + Seeds Fix
 """
 import subprocess
 import os
 import logging
 import json
 import psutil
+import re
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 
@@ -26,6 +28,8 @@ ALLOWED_NUMBERS = [
 ]
 INVENTORY_PATH = os.path.expanduser('~/ansible/inventory.ini')
 VAULT_PASS_FILE = os.path.expanduser('~/.vault_pass')
+AUTODL_FILTER_PATH = os.path.expanduser('~/.autodl/autodl.cfg')
+TORRENT_CLIENT = 'qbittorrent'  # or 'transmission'
 
 def get_dynamic_hosts():
     """Parses inventory.ini for clean hostnames, skipping variables and duplicates."""
@@ -44,6 +48,101 @@ def get_dynamic_hosts():
     except Exception as e:
         logging.error(f"Failed to parse inventory: {e}")
     return hosts
+
+def add_autodl_filter(show_name, filter_type='tv'):
+    """Add a new filter to autodl-irssi config"""
+    try:
+        # Read existing config
+        if os.path.exists(AUTODL_FILTER_PATH):
+            with open(AUTODL_FILTER_PATH, 'r') as f:
+                config = f.read()
+        else:
+            config = ""
+        
+        # Generate new filter ID (find highest existing + 1)
+        filter_ids = re.findall(r'\[filter (\d+)\]', config)
+        next_id = max([int(fid) for fid in filter_ids], default=0) + 1
+        
+        # Create filter block
+        if filter_type == 'tv':
+            new_filter = f"""
+[filter {next_id}]
+enabled = true
+match-releases = {show_name}
+match-categories = TV/x264,TV/x265,TV/HD
+min-size = 100M
+max-size = 5G
+save-path = ~/Downloads/
+"""
+        else:  # movie
+            new_filter = f"""
+[filter {next_id}]
+enabled = true
+match-releases = {show_name}
+match-categories = Movies/x264,Movies/x265,Movies/HD
+min-size = 500M
+max-size = 15G
+save-path = ~/Downloads/
+"""
+        
+        # Append and save
+        with open(AUTODL_FILTER_PATH, 'a') as f:
+            f.write(new_filter)
+        
+        # Reload autodl-irssi (if running)
+        subprocess.run(['pkill', '-HUP', 'autodl-irssi'], check=False)
+        
+        return f"✅ Added filter #{next_id}: {show_name}"
+    except Exception as e:
+        logging.error(f"Failed to add filter: {e}")
+        return f"❌ Error adding filter: {str(e)}"
+
+def get_torrent_status():
+    """Get current torrent seeding status"""
+    try:
+        # Try qBittorrent first
+        try:
+            result = subprocess.run(
+                ['qbittorrent-nox', '--version'],
+                capture_output=True,
+                timeout=5,
+                text=True
+            )
+            if result.returncode == 0:
+                return "🌱 qBittorrent running\n📊 Use web UI for details"
+        except FileNotFoundError:
+            pass
+        
+        # Try transmission-remote
+        try:
+            result = subprocess.run(
+                ['transmission-remote', '-l'],
+                capture_output=True,
+                timeout=5,
+                text=True
+            )
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                if len(lines) > 2:
+                    active = len(lines) - 2
+                    return f"🌱 Transmission: {active} torrents"
+                return "🌱 Transmission: 0 torrents"
+        except FileNotFoundError:
+            pass
+        
+        # Check if any torrent client process is running
+        result = subprocess.run(
+            ['pgrep', '-l', 'qbittorrent|transmission'],
+            capture_output=True,
+            text=True
+        )
+        if result.stdout:
+            return f"🌱 Torrent client running:\n{result.stdout.strip()}"
+        
+        return "❌ No torrent client found"
+        
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
 
 @app.route("/webhook", methods=['POST'])
 def whatsapp_bot():
@@ -110,8 +209,31 @@ def whatsapp_bot():
         except Exception as e:
             msg.body(f"❌ Error: {str(e)}")
 
+    # 5. Add TV Show Filter
+    elif incoming_lower.startswith('addtv '):
+        show_name = incoming_msg[6:].strip()  # Remove 'addtv '
+        if show_name:
+            result = add_autodl_filter(show_name, 'tv')
+            msg.body(f"📺 *TV Filter*\n{result}")
+        else:
+            msg.body("Usage: addtv <show name>")
+
+    # 6. Add Movie Filter
+    elif incoming_lower.startswith('addmovie '):
+        movie_name = incoming_msg[9:].strip()  # Remove 'addmovie '
+        if movie_name:
+            result = add_autodl_filter(movie_name, 'movie')
+            msg.body(f"🎬 *Movie Filter*\n{result}")
+        else:
+            msg.body("Usage: addmovie <movie name>")
+
+    # 7. Torrent Seed Status
+    elif incoming_lower == 'seeds':
+        result = get_torrent_status()
+        msg.body(result)
+
     else:
-        msg.body("Valid commands: fleet, update, pingall, top")
+        msg.body("Commands:\nfleet, update, pingall, top\naddtv <n>, addmovie <n>, seeds")
 
     return str(resp)
 
