@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 WhatsApp Commander Bot - Minty Server Control via Twilio
-Version 0.8.2 - Refined Inventory Parsing & Display
+Version 0.8.2 - Refined Dynamic Inventory Parsing
 """
 import subprocess
 import os
@@ -24,11 +24,11 @@ ALLOWED_NUMBERS = [
     os.getenv('ALLOWED_NUMBER', 'whatsapp:+441174632546'), # Primary Number
     'whatsapp:+447375272694'                              # Your EE Number
 ]
-INVENTORY_PATH = os.path.expanduser('~/ansible/inventory.ini')
-VAULT_PASS_FILE = os.path.expanduser('~/.vault_pass')
+INVENTORY_PATH = os.path.expanduser('~/ansible/inventory.ini') #
+VAULT_PASS_FILE = os.path.expanduser('~/.vault_pass') #
 
 def get_dynamic_hosts():
-    """Parses inventory.ini to return clean hostnames, skipping variables and headers."""
+    """Parses inventory.ini for clean hostnames, skipping variables and duplicates."""
     hosts = ['localhost']
     if not os.path.exists(INVENTORY_PATH):
         return hosts
@@ -36,13 +36,12 @@ def get_dynamic_hosts():
         with open(INVENTORY_PATH, 'r') as f:
             for line in f:
                 line = line.strip()
-                # Skip comments, empty lines, and group headers
+                # Skip comments, empty lines, and group headers like [web]
                 if not line or line.startswith(('[', '#', ';')):
                     continue
-                # Extract the hostname, ignore everything after the first space (variables)
+                # Extract hostname (first part of line), skip if it's a variable definition
                 hostname = line.split()[0]
-                # Filter out specific Ansible variables if they appear as lines
-                if '=' not in hostname and hostname not in hosts:
+                if '=' not in hostname and hostname.upper() != 'MINTY' and hostname not in hosts:
                     hosts.append(hostname)
     except Exception as e:
         logging.error(f"Failed to parse inventory: {e}")
@@ -59,7 +58,7 @@ def whatsapp_bot():
 
     if from_number not in ALLOWED_NUMBERS:
         logging.warning(f"Unauthorized access from {from_number}")
-        msg.body("Unauthorized access attempt.")
+        msg.body("Unauthorized access attempt.") #
         return str(resp)
 
     # 1. Full Fleet Dashboard
@@ -68,10 +67,6 @@ def whatsapp_bot():
         response = "🌐 *Minty Fleet Dashboard*\n"
         
         for host in hosts:
-            # Skip aliases that cause duplicates or noise in the screenshot
-            if host.upper() in ['MINTY']: 
-                continue
-                
             try:
                 if host == 'localhost':
                     with open('/tmp/fleet_health.json', 'r') as f:
@@ -83,16 +78,16 @@ def whatsapp_bot():
                     ).decode()
                 
                 data = json.loads(raw)
-                response += f"\n{data['net']} *{host.upper()}* {data['docker']}"
-                response += f"\n┣ ⏱️ {data['uptime']}"
-                response += f"\n┗ 🛡️ {data.get('knocks', '0')} knocks blocked"
+                response += f"\n{data['net']} *{host.upper()}* {data['docker']}" #
+                response += f"\n┣ ⏱️ {data['uptime']}" #
+                response += f"\n┗ 🛡️ {data.get('knocks', '0')} knocks blocked" #
             except Exception:
-                response += f"\n🔴 *{host.upper()}* ⚠️ (Offline/Unreachable)"
+                response += f"\n🔴 *{host.upper()}* ⚠️ (Offline/Unreachable)" #
         msg.body(response)
 
     # 2. Manual Update Trigger
     elif incoming_lower == 'update':
-        subprocess.Popen(["sudo", "systemctl", "start", "ansible-pull.service"])
+        subprocess.Popen(["sudo", "systemctl", "start", "ansible-pull.service"]) #
         msg.body("🚀 Update triggered manually!")
 
     # 3. Fleet-wide Ping
@@ -105,7 +100,7 @@ def whatsapp_bot():
             success_count = output.count('"ping": "pong"')
             total_hosts = output.count('=>')
             status_emoji = "🟢" if success_count == total_hosts else "🟡"
-            msg.body(f"{status_emoji} *Fleet Health*\n✅ Online: {success_count}/{total_hosts}")
+            msg.body(f"{status_emoji} *Fleet Health*\n✅ Online: {success_count}/{total_hosts}") #
         except Exception as e:
             msg.body(f"❌ Error: {str(e)}")
 
@@ -119,18 +114,17 @@ def whatsapp_bot():
                 "📊 *Local System Resources*\n"
                 f"🖥️ *CPU:* {cpu_usage}%\n"
                 f"🧠 *RAM:* {memory.percent}% ({memory.available // (1024**2)}MB free)\n"
-                f"💾 *Disk:* {disk.percent}% usage"
+                f"💾 *Disk:* {disk.percent}% usage" #
             )
             if os.path.exists("/sys/class/thermal/thermal_zone0/temp"):
                 with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                     temp = int(f.read()) / 1000
-                    stats += f"\n🌡️ *Temp:* {temp:.1f}°C"
+                    stats += f"\n🌡️ *Temp:* {temp:.1f}°C" #
             msg.body(stats)
         except Exception as e:
             msg.body(f"❌ Error fetching stats: {str(e)}")
-
     else:
-        msg.body("Valid commands: fleet, update, pingall, top")
+        msg.body("Valid commands: fleet, update, pingall, top") #
 
     return str(resp)
 
