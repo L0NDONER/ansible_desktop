@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 WhatsApp Commander Bot - Minty Server Control via Twilio
-Version 0.8.2 - Refined Dynamic Inventory Parsing
+Version 0.8.2 - Refined Dynamic Inventory & Shield Display
 """
 import subprocess
 import os
