@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 WhatsApp Commander Bot - Minty Server Control via Twilio
-Version 0.8.1 - Dynamic Inventory & Shield Status
+Version 0.8.2 - Refined Inventory Parsing & Display
 """
 import subprocess
 import os
@@ -28,7 +28,7 @@ INVENTORY_PATH = os.path.expanduser('~/ansible/inventory.ini')
 VAULT_PASS_FILE = os.path.expanduser('~/.vault_pass')
 
 def get_dynamic_hosts():
-    """Parses inventory.ini to return a unique list of hostnames."""
+    """Parses inventory.ini to return clean hostnames, skipping variables and headers."""
     hosts = ['localhost']
     if not os.path.exists(INVENTORY_PATH):
         return hosts
@@ -36,10 +36,14 @@ def get_dynamic_hosts():
         with open(INVENTORY_PATH, 'r') as f:
             for line in f:
                 line = line.strip()
-                if line and not line.startswith(('[', '#', ';')):
-                    hostname = line.split()[0]
-                    if hostname not in hosts:
-                        hosts.append(hostname)
+                # Skip comments, empty lines, and group headers
+                if not line or line.startswith(('[', '#', ';')):
+                    continue
+                # Extract the hostname, ignore everything after the first space (variables)
+                hostname = line.split()[0]
+                # Filter out specific Ansible variables if they appear as lines
+                if '=' not in hostname and hostname not in hosts:
+                    hosts.append(hostname)
     except Exception as e:
         logging.error(f"Failed to parse inventory: {e}")
     return hosts
@@ -58,12 +62,16 @@ def whatsapp_bot():
         msg.body("Unauthorized access attempt.")
         return str(resp)
 
-    # 1. Full Fleet Dashboard (Dynamic + Shield Stats)
+    # 1. Full Fleet Dashboard
     if incoming_lower in ['fleet', 'stats', 'dashboard']:
         hosts = get_dynamic_hosts()
         response = "🌐 *Minty Fleet Dashboard*\n"
         
         for host in hosts:
+            # Skip aliases that cause duplicates or noise in the screenshot
+            if host.upper() in ['MINTY']: 
+                continue
+                
             try:
                 if host == 'localhost':
                     with open('/tmp/fleet_health.json', 'r') as f:
@@ -76,8 +84,8 @@ def whatsapp_bot():
                 
                 data = json.loads(raw)
                 response += f"\n{data['net']} *{host.upper()}* {data['docker']}"
-                response += f"\n├ ⏱️ {data['uptime']}"
-                response += f"\n└ 🛡️ {data.get('knocks', '0')} knocks blocked"
+                response += f"\n┣ ⏱️ {data['uptime']}"
+                response += f"\n┗ 🛡️ {data.get('knocks', '0')} knocks blocked"
             except Exception:
                 response += f"\n🔴 *{host.upper()}* ⚠️ (Offline/Unreachable)"
         msg.body(response)
