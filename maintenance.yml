@@ -5,57 +5,66 @@
 # Version History:
 # 0.10 - 0.21: Initial logic and consolidated reporting
 # 0.22 - 0.24: Pathing fixes and absolute paths
-# 0.25: Added Security Audit (SSH Knock Count)
-# 0.26: Added Fail2Ban Jail Count
+# 0.25: Added security audit (SSH knock count)
+# 0.26: Added Fail2Ban jail count
 # 0.27: Fleet-wide security summary in completion notification
-# 0.28: Integrated Flatpak Audit for Desktop Apps
+# 0.28: Integrated Flatpak audit for desktop apps
 ###########################################################
 
-- name: System Maintenance and Updates
+- name: System maintenance and updates
   hosts: all
   become: yes
-  
+
   tasks:
-    - name: Main Fleet Update Block
+    # ==========================================================================
+    # MAIN FLEET UPDATE BLOCK
+    # ==========================================================================
+    - name: Main fleet update block
       block:
-        # --- INFRASTRUCTURE & MAINTENANCE ---
-        - name: Apply SSH Hardening and Banners
+        # ----------------------------------------------------------------------
+        # Infrastructure & Maintenance
+        # ----------------------------------------------------------------------
+        - name: Apply SSH hardening and banners
           include_tasks: "{{ playbook_dir }}/ssh_harden.yml"
           when: inventory_hostname != 'az'
 
-        # --- AUTO-HEALING VPN LOGIC ---
-        - name: VPN Tunnel Pulse Check
+        # ----------------------------------------------------------------------
+        # Auto-healing VPN logic
+        # ----------------------------------------------------------------------
+        - name: VPN tunnel pulse check
           shell: ping -c 2 10.8.0.1
           register: vpn_ping
           ignore_errors: yes
           changed_when: false
-          when: "inventory_hostname in ['az', 'aws']"
+          when: inventory_hostname in ['az', 'aws']
 
-        - name: Set VPN Healing Flag
+        - name: Set VPN healing flag
           set_fact:
             needs_vpn_heal: "{{ vpn_ping.rc != 0 }}"
-          when: "inventory_hostname in ['az', 'aws']"
+          when: inventory_hostname in ['az', 'aws']
 
-        - name: Auto-Heal Azure VPN
+        - name: Auto-heal Azure VPN
           include_tasks: "{{ playbook_dir }}/azure_vpn_maintenance.yml"
-          when: 
+          when:
             - inventory_hostname == 'az'
             - needs_vpn_heal | default(false)
 
-        - name: Auto-Heal AWS VPN
+        - name: Auto-heal AWS VPN
           include_tasks: "{{ playbook_dir }}/aws_vpn_maintenance.yml"
-          when: 
+          when:
             - inventory_hostname == 'aws'
             - needs_vpn_heal | default(false)
 
-        # --- STANDARD MAINTENANCE ---
-        - name: Install Third Party Software
+        # ----------------------------------------------------------------------
+        # Standard maintenance
+        # ----------------------------------------------------------------------
+        - name: Install third party software
           include_tasks: "{{ playbook_dir }}/third-party-software.yml"
 
-        - name: Run System Updates
+        - name: Run system updates
           include_tasks: "{{ playbook_dir }}/update.yml"
 
-        - name: Check for Reboot
+        - name: Check for reboot requirement
           stat:
             path: /var/run/reboot-required
           register: reboot_required_file
@@ -66,27 +75,31 @@
             reboot_timeout: 3600
           when: reboot_required_file.stat.exists
 
-        # --- SECURITY AUDIT ---
-        - name: Count Failed SSH attempts (Today)
+        # ----------------------------------------------------------------------
+        # Security audit
+        # ----------------------------------------------------------------------
+        - name: Count failed SSH attempts (today)
           shell: "grep 'Failed password' /var/log/auth.log | grep \"$(date +'%b %e')\" | wc -l"
           register: ssh_knocks
           ignore_errors: yes
           changed_when: false
 
-        - name: Count Active Fail2Ban Jails
+        - name: Count active Fail2Ban jails
           shell: "fail2ban-client status sshd | grep 'Currently banned:' | awk '{print $4}'"
           register: jail_count
           ignore_errors: yes
           changed_when: false
 
-        # --- GLOBAL HEALTH ARTIFACT GENERATION ---
-        - name: Generate Health Artifact
+        # ----------------------------------------------------------------------
+        # Global health artifact generation
+        # ----------------------------------------------------------------------
+        - name: Generate health artifact
           shell: |
             ping -c 1 8.8.8.8 > /dev/null 2>&1 && NET="🟢" || NET="🔴"
             if command -v docker >/dev/null; then
               docker ps > /dev/null 2>&1 && DOCKER="🐳" || DOCKER="🚫"
             else
-              DOCKER="❌"
+              DOCKER="⌀"
             fi
             HEAL="{{ needs_vpn_heal | default(false) | ternary('🩹', '') }}"
             UPTIME=$(uptime -p | sed 's/up //')
@@ -96,13 +109,13 @@
           register: health_out
           changed_when: false
 
-        - name: Save Health JSON
+        - name: Save health JSON
           copy:
             content: "{{ health_out.stdout }}"
             dest: /tmp/fleet_health.json
 
       rescue:
-        - name: Send Failure WhatsApp
+        - name: Send failure WhatsApp notification
           community.general.twilio:
             account_sid: "{{ twilio_sid }}"
             auth_token: "{{ tw_auth_k }}"
@@ -112,11 +125,14 @@
               🚨 *Ansible Fleet ALERT*
               🖥️ *Host:* {{ inventory_hostname }}
               ❌ *Status:* FAILED
-              🔍 *Note:* Check logs on {{ inventory_hostname }}
+              📝 *Note:* Check logs on {{ inventory_hostname }}
           delegate_to: localhost
           when: not ansible_check_mode
 
-    - name: Send Consolidated Success WhatsApp
+    # ==========================================================================
+    # CONSOLIDATED SUCCESS NOTIFICATION
+    # ==========================================================================
+    - name: Send consolidated success WhatsApp notification
       community.general.twilio:
         account_sid: "{{ twilio_sid }}"
         auth_token: "{{ tw_auth_k }}"
@@ -131,6 +147,9 @@
       run_once: true
       when: not ansible_check_mode
 
+  # ============================================================================
+  # HANDLERS
+  # ============================================================================
   handlers:
     - name: restart sshd
       service:
