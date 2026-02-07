@@ -56,7 +56,6 @@
           - "{% if days_remaining is defined and days_remaining | int < ssl_warning_days %}⚠️  SSL expires in {{ days_remaining }} days - certbot will auto-renew{% endif %}"
 
     # --- TASK 3: VPN SELF-HEALING LOGIC ---
-    # --- TASK 3: VPN SELF-HEALING LOGIC ---
     - name: Check last healing timestamp (Anti-Flap)
       stat:
         path: /tmp/vpn_last_heal
@@ -108,6 +107,7 @@
           ✅ Service restoration attempted
           🕐 Cooldown: {{ heal_cooldown_minutes }} min
       when: healing_result is changed
+      ignore_errors: yes
 
     - name: Send WhatsApp Alert on SSL Expiry Warning
       community.general.twilio:
@@ -125,3 +125,4 @@
         - days_remaining is defined
         - days_remaining | int < ssl_warning_days
         - days_remaining | int > 0
+      ignore_errors: yes

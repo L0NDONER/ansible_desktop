@@ -11,3 +11,16 @@ FETCH_HEAD
 # Temp files
 sys
 files.zip
+commander/secrets.py
+commander/secrets.py
+# Commander secrets
+commander/secrets.py
+
+# Ansible vault password
+.vault_pass
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd

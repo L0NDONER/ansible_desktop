@@ -1,0 +1,62 @@
+---
+###########################################################
+#        Martin O'Flaherty: Fleet Maintenance             #
+###########################################################
+# Version History:
+# 0.28: Integrated Flatpak audit
+# 0.29: Silent Mode (Cost Saving) + Fleet Disk Audit
+###########################################################
+
+- name: System maintenance and updates
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Main Fleet Update Block
+      block:
+        - name: Apply SSH hardening and banners
+          include_tasks: "{{ playbook_dir }}/ssh_harden.yml"
+          when: inventory_hostname != 'az'
+
+        - name: VPN tunnel pulse check
+          shell: ping -c 2 10.8.0.1
+          register: vpn_ping
+          ignore_errors: yes
+          changed_when: false
+          when: inventory_hostname in ['az', 'aws']
+
+        - name: Run system updates
+          include_tasks: "{{ playbook_dir }}/update.yml"
+
+        - name: Count security metrics
+          shell: "grep 'Failed password' /var/log/auth.log | grep \"$(date +'%b %e')\" | wc -l"
+          register: ssh_knocks
+          ignore_errors: yes
+          changed_when: false
+
+        - name: Generate health artifact with Disk Space
+          shell: |
+            DISK=$(df -h / | awk 'NR==2 {print $5}')
+            UPTIME=$(uptime -p | sed 's/up //')
+            echo "{\"disk\": \"$DISK\", \"uptime\": \"$UPTIME\", \"knocks\": \"{{ ssh_knocks.stdout | trim }}\"}"
+          register: health_out
+          changed_when: false
+
+        - name: Save health JSON
+          copy:
+            content: "{{ health_out.stdout }}"
+            dest: /tmp/fleet_health.json
+
+      rescue:
+        - name: Send failure WhatsApp notification
+          community.general.twilio:
+            account_sid: "{{ twilio_sid }}"
+            auth_token: "{{ tw_auth_k }}"
+            from_number: "whatsapp:{{ twilio_from_number }}"
+            to_number: "whatsapp:{{ my_mobile_number }}"
+            msg: |
+              🚨 *Minty Fleet ALERT*
+              🖥️ *Host:* {{ inventory_hostname }}
+              ❌ *Status:* FAILED during maintenance.
+          delegate_to: localhost
+          when: not ansible_check_mode
