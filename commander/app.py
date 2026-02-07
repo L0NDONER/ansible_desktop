@@ -2,7 +2,7 @@ import os
 import logging
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
-import ollama
+from groq import Groq
 
 from . import config
 from . import actions
@@ -48,20 +48,25 @@ def route_command(body):
 
 
 def get_ai_fallback(body):
-    """Get AI response from Ollama when no command matches"""
+    """Get AI response from Groq when no command matches"""
     try:
-        prompt = "You are Minty, a chill home-lab commander. Start with 'Minty: '."
-        response = ollama.chat(
-            model='llama3.2:3b',
+        client = Groq(api_key=config.GROQ_API_KEY)
+        response = client.chat.completions.create(
+            model="openai/gpt-oss-120b",
             messages=[
-                {'role': 'system', 'content': prompt},
-                {'role': 'user', 'content': body}
-            ]
+                {
+                    "role": "system",
+                    "content": "You are Minty, a chill home-lab commander. Keep responses concise and start with 'Minty: '."
+                },
+                {"role": "user", "content": body}
+            ],
+            max_tokens=300,
+            temperature=0.7
         )
-        return response['message']['content']
+        return response.choices[0].message.content
     except Exception as e:
-        logging.error(f"Ollama error: {e}")
-        return "Minty: Brain fog... give me a second! 🧠"
+        logging.error(f"Groq error: {e}")
+        return "Minty: Brain overclocked, give me a sec! 🧠⚡"
 
 
 @app.route("/webhook", methods=['POST'])
