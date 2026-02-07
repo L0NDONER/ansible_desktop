@@ -1,8 +1,10 @@
---- 
--
-  name: install updates (Ubuntu)
-  package:
-    upgrade: "yes"
-    update_cache: Yes
-    install_recommends: Yes
-    cache_valid_time: 86400 #One day
+---
+- name: Install updates (Ubuntu)
+  hosts: localhost
+  become: yes
+  tasks:
+    - name: Update and upgrade apt packages
+      apt:
+        upgrade: yes
+        update_cache: yes
+        cache_valid_time: 86400  # One day
