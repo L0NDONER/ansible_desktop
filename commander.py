@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 WhatsApp Commander Bot - Minty Server Control via Twilio
-Version 1.0 - Hardened security, validation, robustness
+Version 1.1 - Added natural language + voice support via Ollama & faster-whisper
 """
 import subprocess
 import psutil
@@ -16,6 +16,11 @@ from functools import wraps
 from flask import Flask, request, abort
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.request_validator import RequestValidator
+
+# New imports for natural language & voice
+import ollama
+from faster_whisper import WhisperModel
+import requests
 
 # =============================================================================
 # CONFIGURATION
@@ -32,6 +37,10 @@ TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
 if not TWILIO_AUTH_TOKEN:
     raise ValueError("TWILIO_AUTH_TOKEN environment variable is required")
 
+TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
+if not TWILIO_ACCOUNT_SID:
+    raise ValueError("TWILIO_ACCOUNT_SID environment variable is required")
+
 INVENTORY_PATH = os.path.expanduser(
     os.getenv('INVENTORY_PATH', '~/ansible/inventory.ini')
 )
@@ -43,6 +52,9 @@ AUTODL_FILTER_PATH = os.path.expanduser(
 )
 JELLYLINK_DB_PATH = os.path.expanduser(
     os.getenv('JELLYLINK_DB_PATH', '~/jellylink/jellylink.db')
+)
+DOWNLOAD_DIR = os.path.expanduser(
+    os.getenv('DOWNLOAD_DIR', '~/Downloads')
 )
 
 TORRENT_CLIENT = os.getenv('TORRENT_CLIENT', 'qbittorrent')  # or 'transmission'
@@ -56,6 +68,22 @@ logging.basicConfig(
 app = Flask(__name__)
 validator = RequestValidator(TWILIO_AUTH_TOKEN)
 
+# Whisper model (lazy-loaded on first voice note)
+WHISPER_MODEL = None
+
+
+def get_whisper_model():
+    """Lazy-load Whisper model on first use."""
+    global WHISPER_MODEL
+    if WHISPER_MODEL is None:
+        try:
+            WHISPER_MODEL = WhisperModel("tiny.en", device="cpu", compute_type="int8")
+            logging.info("Whisper model loaded successfully")
+        except Exception as e:
+            logging.error(f"Whisper model load failed: {e}")
+            raise
+    return WHISPER_MODEL
+
 
 # =============================================================================
 # SECURITY & VALIDATION
@@ -66,13 +94,11 @@ def validate_twilio_request(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         signature = request.headers.get('X-Twilio-Signature', '')
-        # Handle Tailscale proxy - use https:// URL for validation
         url = request.url.replace('http://', 'https://')
         post_vars = request.form.to_dict()
 
         if not validator.validate(url, post_vars, signature):
             logging.warning(f"Invalid Twilio signature from {request.remote_addr}")
-            # Fallback: allow if from authorized number (for Tailscale/proxy scenarios)
             from_number = request.values.get('From', '')
             if from_number not in ALLOWED_NUMBERS:
                 abort(403, "Invalid request signature and unauthorized number")
@@ -143,7 +169,7 @@ resolutions=720p,1080p,2160p
 sources=WEB-DL,WEBDL,WEB,HDTV,BluRay
 min-size=200MB
 max-size=25GB
-upload-watch-dir=/home/martin/Downloads
+upload-watch-dir={DOWNLOAD_DIR}
 """
         else:  # movie
             new_filter = f"""
@@ -155,13 +181,12 @@ match-categories=Movies - HD,Movies
 resolutions=1080p,2160p
 min-size=1GB
 max-size=40GB
-upload-watch-dir=/home/martin/Downloads
+upload-watch-dir={DOWNLOAD_DIR}
 """
 
         with open(AUTODL_FILTER_PATH, 'a') as f:
             f.write(new_filter + "\n")
 
-        # Graceful reload
         subprocess.run(['pkill', '-HUP', 'irssi'], check=False, timeout=5)
 
         logging.info(f"Added {filter_type} filter: {show_name}")
@@ -176,7 +201,6 @@ def get_torrent_status() -> str:
     """Detect and report active torrent clients."""
     lines = []
 
-    # qBittorrent-nox
     if shutil.which('qbittorrent-nox'):
         try:
             result = subprocess.run(
@@ -189,7 +213,6 @@ def get_torrent_status() -> str:
         except Exception:
             pass
 
-    # Transmission
     if shutil.which('transmission-remote'):
         try:
             result = subprocess.run(
@@ -320,6 +343,15 @@ def handle_top_command():
         return f"❌ Stats error: {str(e)}"
 
 
+def handle_uptime_command():
+    """Get real system uptime."""
+    try:
+        result = subprocess.run(['uptime'], capture_output=True, text=True, timeout=5).stdout.strip()
+        return f"⏱️ {result}"
+    except Exception as e:
+        return f"❌ Uptime check failed: {str(e)}"
+
+
 def get_help_text():
     """Return help text with available commands."""
     return (
@@ -328,11 +360,51 @@ def get_help_text():
         "• update\n"
         "• pingall\n"
         "• top\n"
+        "• uptime\n"
         "• addtv <show>\n"
         "• addmovie <title>\n"
         "• seeds\n"
-        "• recent"
+        "• recent\n\n"
+        "You can also speak or write naturally (e.g. 'whats my uptime' or 'add tv the office')"
     )
+
+
+# =============================================================================
+# NATURAL LANGUAGE PARSING WITH OLLAMA
+# =============================================================================
+
+def parse_with_ollama(text: str) -> str:
+    """Send text to Ollama and return its response."""
+    try:
+        system_prompt = """
+You are Minty, a chill home-lab commander bot. Understand casual language, typos, slang.
+Available actions:
+- uptime → show system uptime
+- top → CPU/RAM stats
+- fleet / dashboard / stats → fleet health overview
+- pingall → ping all hosts
+- update → trigger ansible-pull
+- addtv <show> → add TV filter
+- addmovie <title> → add movie filter
+- seeds → torrent status
+- recent → last 5 media items
+
+Rules:
+- Reply short, fun, with emojis.
+- If action needed, start with "ACTION: command args" then friendly text.
+- If unclear, ask nicely.
+- No long explanations unless asked.
+"""
+
+        response = ollama.chat(model='llama3.2:3b', messages=[
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': text}
+        ])
+        return response['message']['content'].strip()
+
+    except Exception as e:
+        logging.error(f"Ollama failed: {e}")
+        return ""
 
 
 # =============================================================================
@@ -344,13 +416,13 @@ def get_help_text():
 def whatsapp_bot():
     """Main webhook handler for WhatsApp messages."""
     incoming_msg = (request.values.get('Body') or '').strip()
-    incoming_lower = incoming_msg.lower()
     from_number = request.values.get('From', '')
+    media_url = request.values.get('MediaUrl0')
+    media_type = request.values.get('MediaContentType0', '')
 
     resp = MessagingResponse()
     msg = resp.message()
 
-    # Authorization check
     if from_number not in ALLOWED_NUMBERS:
         msg.body("Unauthorized number.")
         logging.warning(f"Unauthorized access attempt from {from_number}")
@@ -358,42 +430,127 @@ def whatsapp_bot():
 
     logging.info(f"Command from {from_number}: {incoming_msg}")
 
-    # Command routing
-    if incoming_lower in ['fleet', 'stats', 'dashboard']:
-        msg.body(handle_fleet_command())
+    # Handle voice note if present
+    audio_path = None
+    if media_url and 'audio' in media_type.lower():
+        logging.info(f"Voice note detected: {media_url}")
+        try:
+            logging.info("Downloading audio from Twilio...")
+            r = requests.get(media_url, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+            logging.info(f"Audio download status: {r.status_code}, size: {len(r.content)} bytes")
+            
+            if r.status_code == 200:
+                audio_path = '/tmp/whatsapp_voice.ogg'
+                with open(audio_path, 'wb') as f:
+                    f.write(r.content)
+                logging.info(f"Audio saved to {audio_path}")
 
-    elif incoming_lower == 'update':
-        msg.body(handle_update_command())
+                logging.info("Loading Whisper model...")
+                model = get_whisper_model()
+                logging.info("Transcribing audio...")
+                segments, _ = model.transcribe(audio_path, beam_size=5)
+                incoming_msg = ' '.join([s.text for s in segments]).strip()
 
-    elif incoming_lower == 'pingall':
-        msg.body(handle_pingall_command())
+                logging.info(f"Transcribed voice: '{incoming_msg}' (length: {len(incoming_msg)})")
+            else:
+                logging.error(f"Failed to download audio: HTTP {r.status_code}")
+                incoming_msg = ""
+        except Exception as e:
+            logging.error(f"Voice processing failed: {e}", exc_info=True)
+            incoming_msg = ""
+        finally:
+            if audio_path and os.path.exists(audio_path):
+                try:
+                    os.remove(audio_path)
+                    logging.info(f"Cleaned up {audio_path}")
+                except Exception:
+                    pass
 
-    elif incoming_lower == 'top':
-        msg.body(handle_top_command())
+    if not incoming_msg:
+        msg.body("Couldn't understand the message or voice note.")
+        return str(resp)
 
-    elif incoming_lower.startswith('addtv '):
-        show = incoming_msg[6:].strip()
-        if show:
-            msg.body(f"📺 TV filter\n{add_autodl_filter(show, 'tv')}")
+    incoming_lower = incoming_msg.lower()
+
+    # Try natural language via Ollama first
+    ollama_reply = parse_with_ollama(incoming_msg)
+    
+    reply_text = None
+    executed = False
+
+    # Parse for ACTION: and execute real handler
+    if ollama_reply and ollama_reply.startswith("ACTION:"):
+        action_part = ollama_reply.split("ACTION:", 1)[1].strip().lower()
+
+        if "uptime" in action_part:
+            reply_text = handle_uptime_command()
+            executed = True
+        elif any(x in action_part for x in ['fleet', 'dashboard', 'stats']):
+            reply_text = handle_fleet_command()
+            executed = True
+        elif "update" in action_part:
+            reply_text = handle_update_command()
+            executed = True
+        elif "pingall" in action_part:
+            reply_text = handle_pingall_command()
+            executed = True
+        elif "top" in action_part:
+            reply_text = handle_top_command()
+            executed = True
+        elif action_part.startswith("addtv "):
+            show = action_part[6:].strip()
+            if show:
+                reply_text = f"📺 TV filter\n{add_autodl_filter(show, 'tv')}"
+                executed = True
+        elif action_part.startswith("addmovie "):
+            movie = action_part[9:].strip()
+            if movie:
+                reply_text = f"🎬 Movie filter\n{add_autodl_filter(movie, 'movie')}"
+                executed = True
+        elif "seeds" in action_part:
+            reply_text = get_torrent_status()
+            executed = True
+        elif "recent" in action_part:
+            reply_text = get_recent_media(5)
+            executed = True
+
+        if executed:
+            reply_text += "\n\n(Minty AI parsed your request 😎)"
+
+    # Fallback to exact string matching if Ollama didn't handle it
+    if not executed:
+        if incoming_lower in ['fleet', 'stats', 'dashboard']:
+            reply_text = handle_fleet_command()
+        elif incoming_lower == 'update':
+            reply_text = handle_update_command()
+        elif incoming_lower == 'pingall':
+            reply_text = handle_pingall_command()
+        elif incoming_lower == 'top':
+            reply_text = handle_top_command()
+        elif incoming_lower == 'uptime':
+            reply_text = handle_uptime_command()
+        elif incoming_lower.startswith('addtv '):
+            show = incoming_msg[6:].strip()
+            if show:
+                reply_text = f"📺 TV filter\n{add_autodl_filter(show, 'tv')}"
+            else:
+                reply_text = "Usage: addtv Show Name"
+        elif incoming_lower.startswith('addmovie '):
+            movie = incoming_msg[9:].strip()
+            if movie:
+                reply_text = f"🎬 Movie filter\n{add_autodl_filter(movie, 'movie')}"
+            else:
+                reply_text = "Usage: addmovie Movie Name"
+        elif incoming_lower == 'seeds':
+            reply_text = get_torrent_status()
+        elif incoming_lower == 'recent':
+            reply_text = get_recent_media(5)
+        elif ollama_reply:
+            reply_text = ollama_reply
         else:
-            msg.body("Usage: addtv Show Name")
+            reply_text = get_help_text()
 
-    elif incoming_lower.startswith('addmovie '):
-        movie = incoming_msg[9:].strip()
-        if movie:
-            msg.body(f"🎬 Movie filter\n{add_autodl_filter(movie, 'movie')}")
-        else:
-            msg.body("Usage: addmovie Movie Name")
-
-    elif incoming_lower == 'seeds':
-        msg.body(get_torrent_status())
-
-    elif incoming_lower == 'recent':
-        msg.body(get_recent_media(5))
-
-    else:
-        msg.body(get_help_text())
-
+    msg.body(reply_text)
     return str(resp)
 
 
